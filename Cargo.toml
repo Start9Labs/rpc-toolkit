@@ -1,0 +1,2 @@
+[workspace]
+members = ["rpc-toolkit", "rpc-toolkit-macro", "rpc-toolkit-macro-internals"]

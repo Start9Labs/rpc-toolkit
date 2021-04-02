@@ -1,0 +1,24 @@
+[package]
+authors = ["Aiden McClelland <me@drbonez.dev>"]
+edition = "2018"
+name = "rpc-toolkit"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+cbor = ["serde_cbor"]
+default = ["cbor"]
+
+[dependencies]
+clap = "2.33.3"
+hyper = { version = "0.14.5", features = ["server", "http1", "http2", "tcp", "stream", "client"] }
+lazy_static = "1.4.0"
+reqwest = { version = "0.11.2" }
+rpc-toolkit-macro = { path = "../rpc-toolkit-macro" }
+serde = { version = "1.0.125", features = ["derive"] }
+serde_cbor = { version = "0.11.1", optional = true }
+serde_json = "1.0.64"
+thiserror = "1.0.24"
+tokio = { version = "1.4.0", features = ["full"] }
+url = "2.2.1"
+yajrc = { path = "../../yajrc" }
