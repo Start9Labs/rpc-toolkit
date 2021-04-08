@@ -1,12 +1,15 @@
-pub use crate as rpc_toolkit;
-use crate::{command, rpc_server, Context, SeedableContext};
+use std::fmt::Display;
+use std::str::FromStr;
+use std::sync::Arc;
+
 use clap::Arg;
 use rpc_toolkit_macro::run_cli;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
-use std::{fmt::Display, sync::Arc};
 use url::Host;
 use yajrc::RpcError;
+
+pub use crate as rpc_toolkit;
+use crate::{command, rpc_server, Context, SeedableContext};
 
 pub struct AppState<T, U> {
     seed: T,
@@ -93,8 +96,9 @@ fn dothething2<U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E>, E: Dis
 
 #[tokio::test]
 async fn test() {
-    use crate as rpc_toolkit;
     use tokio::io::AsyncWriteExt;
+
+    use crate as rpc_toolkit;
 
     let seed = Arc::new(ConfigSeed {
         host: Host::parse("localhost").unwrap(),

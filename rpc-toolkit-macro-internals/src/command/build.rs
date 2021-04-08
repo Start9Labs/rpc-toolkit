@@ -1,14 +1,14 @@
-use super::parse::*;
-use super::*;
+use std::collections::HashSet;
+
 use proc_macro2::*;
 use quote::*;
-use std::collections::HashSet;
-use syn::{
-    fold::Fold,
-    punctuated::Punctuated,
-    spanned::Spanned,
-    token::{Comma, Where},
-};
+use syn::fold::Fold;
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
+use syn::token::{Comma, Where};
+
+use super::parse::*;
+use super::*;
 
 fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> TokenStream {
     let about = opt.common().about.clone().into_iter();

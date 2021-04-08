@@ -1,5 +1,6 @@
-use super::*;
 use syn::parse::{Parse, ParseStream};
+
+use super::*;
 
 impl Parse for RpcServerArgs {
     fn parse(input: ParseStream) -> Result<Self> {

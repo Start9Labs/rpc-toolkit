@@ -1,5 +1,6 @@
-use super::*;
 use syn::spanned::Spanned;
+
+use super::*;
 
 pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
     let mut opt = Options::Leaf(Default::default());

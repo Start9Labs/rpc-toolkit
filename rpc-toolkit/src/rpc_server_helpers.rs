@@ -1,16 +1,16 @@
 use std::marker::PhantomData;
 
-use crate::SeedableContext;
-use hyper::{
-    body::Buf,
-    server::{conn::AddrIncoming, Builder, Server},
-    Body, Request, Response, StatusCode,
-};
+use hyper::body::Buf;
+use hyper::server::conn::AddrIncoming;
+use hyper::server::{Builder, Server};
+use hyper::{Body, Request, Response, StatusCode};
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use serde_json::Value;
 use url::Host;
 use yajrc::{AnyRpcMethod, GenericRpcMethod, Id, RpcError, RpcRequest, RpcResponse};
+
+use crate::SeedableContext;
 
 lazy_static! {
     #[cfg(feature = "cbor")]

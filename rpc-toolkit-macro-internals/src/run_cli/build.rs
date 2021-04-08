@@ -1,7 +1,8 @@
-use super::*;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::spanned::Spanned;
+
+use super::*;
 
 pub fn build(args: RunCliArgs) -> TokenStream {
     let mut command_handler = args.command.clone();

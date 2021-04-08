@@ -1,5 +1,7 @@
+use std::fmt::Display;
+use std::io::Stdin;
+use std::marker::PhantomData;
 use std::str::FromStr;
-use std::{fmt::Display, io::Stdin, marker::PhantomData};
 
 use clap::ArgMatches;
 use hyper::Method;
@@ -10,18 +12,21 @@ use yajrc::{GenericRpcMethod, Id, RpcError, RpcRequest, RpcResponse};
 use crate::Context;
 
 pub mod prelude {
+    pub use std::borrow::Cow;
+    pub use std::marker::PhantomData;
+
+    pub use clap::{App, AppSettings, Arg, ArgMatches};
+    pub use serde::{Deserialize, Serialize};
+    pub use serde_json::{from_value, to_value, Value};
+    pub use tokio::runtime::Runtime;
+    pub use tokio::task::spawn_blocking;
+    pub use yajrc::{self, RpcError};
+
     pub use super::{
         call_remote, default_arg_parser, default_display, default_stdin_parser, make_phantom,
         match_types,
     };
     pub use crate::Context;
-    pub use clap::{App, AppSettings, Arg, ArgMatches};
-    pub use serde::{Deserialize, Serialize};
-    pub use serde_json::{from_value, to_value, Value};
-    pub use std::borrow::Cow;
-    pub use std::marker::PhantomData;
-    pub use tokio::{runtime::Runtime, task::spawn_blocking};
-    pub use yajrc::{self, RpcError};
 }
 
 #[derive(Debug, Error)]
