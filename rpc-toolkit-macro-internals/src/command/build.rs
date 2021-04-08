@@ -566,7 +566,42 @@ fn cli_handler(
                 })
             }
         },
-        Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::CliOnly(_)) => {
+        Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::Standard) => {
+            let param = param.map(|_| quote! { unreachable!() });
+            let invocation = if opt.is_async {
+                quote! {
+                    rt_ref.block_on(#fn_path(#(#param),*))?
+                }
+            } else {
+                quote! {
+                    #fn_path(#(#param),*)?
+                }
+            };
+            quote! {
+                pub fn cli_handler#generics(
+                    ctx: #ctx_ty,
+                    mut rt: Option<rpc_toolkit_prelude::Runtime>,
+                    matches: &rpc_toolkit_prelude::ArgMatches<'_>,
+                    method: rpc_toolkit_prelude::Cow<'_, str>,
+                    parent_params: ParentParams,
+                ) -> Result<(), rpc_toolkit_prelude::RpcError> {
+                    #param_struct_def
+
+                    #create_rt
+
+                    #[allow(unreachable_code)]
+                    let return_ty = if true {
+                        rpc_toolkit_prelude::PhantomData
+                    } else {
+                        rpc_toolkit_prelude::make_phantom(#invocation)
+                    };
+
+                    let res = rt_ref.block_on(rpc_toolkit_prelude::call_remote(ctx, method.as_ref(), params, return_ty))?;
+                    Ok(#display(res.result?))
+                }
+            }
+        }
+        Options::Leaf(opt) => {
             let invocation = if opt.is_async {
                 quote! {
                     rt_ref.block_on(#fn_path(#(#param),*))?
@@ -602,41 +637,6 @@ fn cli_handler(
                 ) -> Result<(), rpc_toolkit_prelude::RpcError> {
                     #rt_action
                     Ok(#display_res)
-                }
-            }
-        }
-        Options::Leaf(opt) => {
-            let param = param.map(|_| quote! { unreachable!() });
-            let invocation = if opt.is_async {
-                quote! {
-                    rt_ref.block_on(#fn_path(#(#param),*))?
-                }
-            } else {
-                quote! {
-                    #fn_path(#(#param),*)?
-                }
-            };
-            quote! {
-                pub fn cli_handler#generics(
-                    ctx: #ctx_ty,
-                    mut rt: Option<rpc_toolkit_prelude::Runtime>,
-                    matches: &rpc_toolkit_prelude::ArgMatches<'_>,
-                    method: rpc_toolkit_prelude::Cow<'_, str>,
-                    parent_params: ParentParams,
-                ) -> Result<(), rpc_toolkit_prelude::RpcError> {
-                    #param_struct_def
-
-                    #create_rt
-
-                    #[allow(unreachable_code)]
-                    let return_ty = if true {
-                        rpc_toolkit_prelude::PhantomData
-                    } else {
-                        rpc_toolkit_prelude::make_phantom(#invocation)
-                    };
-
-                    let res = rt_ref.block_on(rpc_toolkit_prelude::call_remote(ctx, method.as_ref(), params, return_ty))?;
-                    Ok(#display(res.result?))
                 }
             }
         }
