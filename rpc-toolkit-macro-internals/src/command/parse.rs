@@ -126,18 +126,92 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                     "`display` cannot be assigned to",
                 ));
             }
+            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("cli_only") => {
+                match &opt.common().exec_ctx {
+                    ExecutionContext::Standard => {
+                        opt.common().exec_ctx = ExecutionContext::CliOnly(p)
+                    }
+                    ExecutionContext::CliOnly(_) => {
+                        return Err(Error::new(p.span(), "duplicate argument: `cli_only`"))
+                    }
+                    ExecutionContext::RpcOnly(_) => {
+                        return Err(Error::new(
+                            p.span(),
+                            "`cli_only` and `rpc_only` are mutually exclusive",
+                        ))
+                    }
+                    ExecutionContext::Local(_) => {
+                        return Err(Error::new(
+                            p.span(),
+                            "`cli_only` and `local` are mutually exclusive",
+                        ))
+                    }
+                }
+            }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("cli_only") => {
+                return Err(Error::new(
+                    list.path.span(),
+                    "`cli_only` does not take any arguments",
+                ));
+            }
+            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("cli_only") => {
+                return Err(Error::new(
+                    nv.path.span(),
+                    "`cli_only` cannot be assigned to",
+                ));
+            }
+            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("rpc_only") => {
+                match &opt.common().exec_ctx {
+                    ExecutionContext::Standard => {
+                        opt.common().exec_ctx = ExecutionContext::RpcOnly(p)
+                    }
+                    ExecutionContext::RpcOnly(_) => {
+                        return Err(Error::new(p.span(), "duplicate argument: `rpc_only`"))
+                    }
+                    ExecutionContext::CliOnly(_) => {
+                        return Err(Error::new(
+                            p.span(),
+                            "`rpc_only` and `cli_only` are mutually exclusive",
+                        ))
+                    }
+                    ExecutionContext::Local(_) => {
+                        return Err(Error::new(
+                            p.span(),
+                            "`rpc_only` and `local` are mutually exclusive",
+                        ))
+                    }
+                }
+            }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("rpc_only") => {
+                return Err(Error::new(
+                    list.path.span(),
+                    "`rpc_only` does not take any arguments",
+                ));
+            }
+            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("rpc_only") => {
+                return Err(Error::new(
+                    nv.path.span(),
+                    "`rpc_only` cannot be assigned to",
+                ));
+            }
             NestedMeta::Meta(Meta::Path(p)) if p.is_ident("local") => {
                 match &opt.common().exec_ctx {
                     ExecutionContext::Standard => {
-                        opt.common().exec_ctx = ExecutionContext::LocalOnly(p)
+                        opt.common().exec_ctx = ExecutionContext::Local(p)
                     }
-                    ExecutionContext::LocalOnly(_) => {
+                    ExecutionContext::Local(_) => {
                         return Err(Error::new(p.span(), "duplicate argument: `local`"))
                     }
-                    ExecutionContext::RemoteOnly(_) => {
+                    ExecutionContext::RpcOnly(_) => {
                         return Err(Error::new(
                             p.span(),
-                            "`local` and `remote` are mutually exclusive",
+                            "`local` and `rpc_only` are mutually exclusive",
+                        ))
+                    }
+                    ExecutionContext::CliOnly(_) => {
+                        return Err(Error::new(
+                            p.span(),
+                            "`local` and `cli_only` are mutually exclusive",
                         ))
                     }
                 }
@@ -150,31 +224,6 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
             }
             NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("local") => {
                 return Err(Error::new(nv.path.span(), "`local` cannot be assigned to"));
-            }
-            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("remote") => {
-                match &opt.common().exec_ctx {
-                    ExecutionContext::Standard => {
-                        opt.common().exec_ctx = ExecutionContext::RemoteOnly(p)
-                    }
-                    ExecutionContext::LocalOnly(_) => {
-                        return Err(Error::new(p.span(), "duplicate argument: `remote`"))
-                    }
-                    ExecutionContext::RemoteOnly(_) => {
-                        return Err(Error::new(
-                            p.span(),
-                            "`local` and `remote` are mutually exclusive",
-                        ))
-                    }
-                }
-            }
-            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("remote") => {
-                return Err(Error::new(
-                    list.path.span(),
-                    "`remote` does not take any arguments",
-                ));
-            }
-            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("remote") => {
-                return Err(Error::new(nv.path.span(), "`remote` cannot be assigned to"));
             }
             NestedMeta::Meta(Meta::Path(p)) if p.is_ident("blocking") => {
                 if opt.common().blocking.is_some() {
@@ -249,16 +298,16 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                 ));
             }
             match &opt.common.exec_ctx {
-                ExecutionContext::LocalOnly(local) => {
+                ExecutionContext::CliOnly(cli_only) => {
                     return Err(Error::new(
-                        local.span(),
-                        "cannot define `local` for a command without an implementation",
+                        cli_only.span(),
+                        "cannot define `cli_only` for a command without an implementation",
                     ))
                 }
-                ExecutionContext::RemoteOnly(remote) => {
+                ExecutionContext::RpcOnly(rpc_only) => {
                     return Err(Error::new(
-                        remote.span(),
-                        "cannot define `remote` for a command without an implementation",
+                        rpc_only.span(),
+                        "cannot define `rpc_only` for a command without an implementation",
                     ))
                 }
                 _ => (),

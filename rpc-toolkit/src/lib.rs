@@ -1,14 +1,7 @@
-pub use crate::context::{Context, SeedableContext};
-pub use clap;
-pub use hyper;
-pub use serde;
-pub use serde_json;
-pub use tokio;
-pub use yajrc;
-
 /// `#[command(...)]`
-/// - `#[command(local)]` -> executed by CLI instead of RPC server (leaf commands only)
-/// - `#[command(remote)]` -> no CLI bindings (leaf commands only)
+/// - `#[command(cli_only)]` -> executed by CLI instead of RPC server (leaf commands only)
+/// - `#[command(rpc_only)]` -> no CLI bindings (leaf commands only)
+/// - `#[command(local)]` -> executed wherever it was invoked. (By RPC when hit from RPC server, by cli when invoked from CLI)
 /// - `#[command(blocking)]` -> run with [spawn_blocking](tokio::task::spawn_blocking) if in an async context
 /// - `#[command(about = "About text")]` -> Set about text for the command
 /// - `#[command(rename = "new_name")]` -> Set the name of the command to `new_name` in the RPC and CLI
@@ -27,7 +20,6 @@ pub use yajrc;
 ///
 /// See also: [arg](rpc_toolkit_macro::arg), [context](rpc_toolkit_macro::context)
 pub use rpc_toolkit_macro::command;
-
 /// `rpc_server!(command, seed, status_fn)`
 /// - returns: [Server](hyper::Server)
 /// - `command`: path to an rpc command (with the `#[command]` attribute)
@@ -35,7 +27,6 @@ pub use rpc_toolkit_macro::command;
 /// - `status_fn` (optional): a function that takes a JSON RPC error code (`i32`) and returns a [StatusCode](hyper::StatusCode)
 ///   - default: `|_| StatusCode::OK`
 pub use rpc_toolkit_macro::rpc_server;
-
 /// `run_cli!(command, app_mutator, make_seed, exit_fn)`
 /// - this function does not return
 /// - `command`: path to an rpc command (with the `#[command]` attribute)
@@ -48,6 +39,9 @@ pub use rpc_toolkit_macro::rpc_server;
 /// - `exit_fn` (optional): a function that takes a JSON RPC error code (`i32`) and returns an Exit code (`i32`)
 ///   - default: `|code| code`
 pub use rpc_toolkit_macro::run_cli;
+pub use {clap, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
+
+pub use crate::context::{Context, SeedableContext};
 
 pub mod command_helpers;
 mod context;

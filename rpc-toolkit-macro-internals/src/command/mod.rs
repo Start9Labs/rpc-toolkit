@@ -5,8 +5,9 @@ mod parse;
 
 pub enum ExecutionContext {
     Standard,
-    LocalOnly(Path),
-    RemoteOnly(Path),
+    CliOnly(Path),
+    RpcOnly(Path),
+    Local(Path),
 }
 impl Default for ExecutionContext {
     fn default() -> Self {

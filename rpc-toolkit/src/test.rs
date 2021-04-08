@@ -115,7 +115,6 @@ async fn test() {
         .arg("test::cli_test")
         .arg("--exact")
         .arg("--nocapture")
-        .arg("--ignored")
         .arg("--")
         .arg("-b")
         .arg("test")
@@ -132,8 +131,7 @@ async fn test() {
         .unwrap();
     let out = cmd.wait_with_output().await.unwrap();
     assert!(out.status.success());
-    assert!(std::str::from_utf8(&out.stdout)
-        .unwrap()
+    assert!(dbg!(std::str::from_utf8(&out.stdout).unwrap())
         .contains("\nNone, test, false, \"TEST\", \"HAHA\"\n"));
     handle.abort();
 }

@@ -264,7 +264,7 @@ fn rpc_handler(
         _ => unreachable!(),
     });
     match opt {
-        Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::LocalOnly(_)) => quote! {
+        Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::CliOnly(_)) => quote! {
             #param_struct_def
 
             pub async fn rpc_handler#fn_generics(
@@ -347,7 +347,7 @@ fn rpc_handler(
                 }
             };
             match self_impl {
-                Some(self_impl) if !matches!(common.exec_ctx, ExecutionContext::LocalOnly(_)) => {
+                Some(self_impl) if !matches!(common.exec_ctx, ExecutionContext::CliOnly(_)) => {
                     let self_impl_fn = &self_impl.path;
                     let self_impl = if self_impl.is_async {
                         quote_spanned! { self_impl_fn.span() =>
@@ -552,7 +552,7 @@ fn cli_handler(
         quote! { rpc_toolkit_prelude::default_display }
     };
     match opt {
-        Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::RemoteOnly(_)) => quote! {
+        Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::RpcOnly(_)) => quote! {
             pub fn cli_handler#generics(
                 _ctx: #ctx_ty,
                 _rt: Option<rpc_toolkit_prelude::Runtime>,
@@ -566,7 +566,7 @@ fn cli_handler(
                 })
             }
         },
-        Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::LocalOnly(_)) => {
+        Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::CliOnly(_)) => {
             let invocation = if opt.is_async {
                 quote! {
                     rt_ref.block_on(#fn_path(#(#param),*))?
@@ -687,7 +687,7 @@ fn cli_handler(
                 }
             });
             let self_impl = match (self_impl, &common.exec_ctx) {
-                (Some(self_impl), ExecutionContext::LocalOnly(_)) => {
+                (Some(self_impl), ExecutionContext::CliOnly(_)) => {
                     let self_impl_fn = &self_impl.path;
                     let create_rt = if common.is_async {
                         None
