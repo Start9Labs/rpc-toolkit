@@ -2,12 +2,12 @@ use syn::parse::{Parse, ParseStream};
 
 use super::*;
 
-impl Parse for MakeSeed {
+impl Parse for MakeCtx {
     fn parse(input: ParseStream) -> Result<Self> {
         let matches_ident = input.parse()?;
         let _: token::FatArrow = input.parse()?;
         let body = input.parse()?;
-        Ok(MakeSeed {
+        Ok(MakeCtx {
             matches_ident,
             body,
         })
@@ -37,7 +37,7 @@ impl Parse for RunCliArgs {
         if !input.is_empty() {
             let _: token::Comma = input.parse()?;
         }
-        let make_seed = if !input.is_empty() {
+        let make_ctx = if !input.is_empty() {
             Some(input.parse()?)
         } else {
             None
@@ -53,7 +53,7 @@ impl Parse for RunCliArgs {
         Ok(RunCliArgs {
             command,
             mut_app,
-            make_seed,
+            make_ctx,
             exit_fn,
         })
     }

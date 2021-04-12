@@ -26,14 +26,4 @@ pub trait Context {
     }
 }
 
-pub trait SeedableContext<T: Clone>: Context {
-    fn new(seed: T) -> Self;
-}
-
 impl Context for () {}
-
-impl<T: Copy> SeedableContext<T> for () {
-    fn new(_: T) -> Self {
-        ()
-    }
-}

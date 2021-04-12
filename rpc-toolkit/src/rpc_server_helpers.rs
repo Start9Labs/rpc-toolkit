@@ -10,7 +10,7 @@ use serde_json::Value;
 use url::Host;
 use yajrc::{AnyRpcMethod, GenericRpcMethod, Id, RpcError, RpcRequest, RpcResponse};
 
-use crate::SeedableContext;
+use crate::Context;
 
 lazy_static! {
     #[cfg(feature = "cbor")]
@@ -20,10 +20,7 @@ lazy_static! {
         serde_json::to_vec(&RpcResponse::<AnyRpcMethod<'static>>::from(yajrc::INTERNAL_ERROR)).unwrap();
 }
 
-pub fn make_builder<Ctx: SeedableContext<Seed>, Seed: Clone>(
-    seed: Seed,
-) -> (Builder<AddrIncoming>, PhantomData<Ctx>) {
-    let ctx = Ctx::new(seed);
+pub fn make_builder<Ctx: Context>(ctx: &Ctx) -> (Builder<AddrIncoming>, PhantomData<Ctx>) {
     let addr = match ctx.host() {
         Host::Ipv4(ip) => (ip, ctx.port()).into(),
         Host::Ipv6(ip) => (ip, ctx.port()).into(),

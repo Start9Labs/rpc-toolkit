@@ -9,8 +9,9 @@ use url::Host;
 use yajrc::RpcError;
 
 pub use crate as rpc_toolkit;
-use crate::{command, rpc_server, Context, SeedableContext};
+use crate::{command, rpc_server, Context};
 
+#[derive(Debug, Clone)]
 pub struct AppState<T, U> {
     seed: T,
     data: U,
@@ -29,14 +30,6 @@ pub struct ConfigSeed {
     port: u16,
 }
 
-impl SeedableContext<Arc<ConfigSeed>> for AppState<Arc<ConfigSeed>, ()> {
-    fn new(seed: Arc<ConfigSeed>) -> Self {
-        AppState {
-            seed: seed.clone(),
-            data: (),
-        }
-    }
-}
 impl<T> Context for AppState<Arc<ConfigSeed>, T> {
     fn host(&self) -> Host<&str> {
         match &self.seed.host {
@@ -104,7 +97,7 @@ async fn test() {
         host: Host::parse("localhost").unwrap(),
         port: 8000,
     });
-    let server = rpc_server!(dothething::<String, _>, seed);
+    let server = rpc_server!(dothething::<String, _>, AppState { seed, data: () });
     let handle = tokio::spawn(server);
     let mut cmd = tokio::process::Command::new("cargo")
         .arg("test")
@@ -158,7 +151,7 @@ fn cli_test() {
         port: 8000,
     });
     dothething::cli_handler::<String, _, _>(
-        SeedableContext::new(seed),
+        AppState { seed, data: () },
         None,
         &matches,
         "".into(),
@@ -175,10 +168,10 @@ fn cli_example() {
         app => app
             .arg(Arg::with_name("host").long("host").short("h").takes_value(true))
             .arg(Arg::with_name("port").long("port").short("p").takes_value(true)),
-        matches => Arc::new(ConfigSeed {
+        matches => AppState { seed: Arc::new(ConfigSeed {
             host: Host::parse(matches.value_of("host").unwrap_or("localhost")).unwrap(),
             port: matches.value_of("port").unwrap_or("8000").parse().unwrap(),
-        }),
+        }), data: () },
         |code| if code < 0 { 1 } else { code }
     )
 }

@@ -30,17 +30,17 @@ pub fn build(args: RunCliArgs) -> TokenStream {
     } else {
         quote! { #command::build_app() }
     };
-    let make_ctx = if let Some(make_seed) = args.make_seed {
-        let ident = make_seed.matches_ident;
-        let body = make_seed.body;
+    let make_ctx = if let Some(make_ctx) = args.make_ctx {
+        let ident = make_ctx.matches_ident;
+        let body = make_ctx.body;
         quote! {
             {
                 let #ident = &rpc_toolkit_matches;
-                rpc_toolkit::SeedableContext::new(#body)
+                #body
             }
         }
     } else {
-        quote! { rpc_toolkit::SeedableContext::new(&rpc_toolkit_matches) }
+        quote! { &rpc_toolkit_matches }
     };
     let exit_fn = args
         .exit_fn

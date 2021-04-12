@@ -6,7 +6,7 @@ impl Parse for RpcServerArgs {
     fn parse(input: ParseStream) -> Result<Self> {
         let command = input.parse()?;
         let _: token::Comma = input.parse()?;
-        let seed = input.parse()?;
+        let ctx = input.parse()?;
         if !input.is_empty() {
             let _: token::Comma = input.parse()?;
         }
@@ -17,7 +17,7 @@ impl Parse for RpcServerArgs {
         };
         Ok(RpcServerArgs {
             command,
-            seed,
+            ctx,
             status_fn,
         })
     }

@@ -2,7 +2,7 @@ use syn::*;
 
 pub struct RpcServerArgs {
     command: Path,
-    seed: Expr,
+    ctx: Expr,
     status_fn: Option<Expr>,
 }
 

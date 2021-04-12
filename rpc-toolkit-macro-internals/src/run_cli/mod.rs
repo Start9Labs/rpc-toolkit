@@ -1,6 +1,6 @@
 use syn::*;
 
-pub struct MakeSeed {
+pub struct MakeCtx {
     matches_ident: Ident,
     body: Expr,
 }
@@ -13,7 +13,7 @@ pub struct MutApp {
 pub struct RunCliArgs {
     command: Path,
     mut_app: Option<MutApp>,
-    make_seed: Option<MakeSeed>,
+    make_ctx: Option<MakeCtx>,
     exit_fn: Option<Expr>,
 }
 
