@@ -18,6 +18,8 @@ pub fn command(args: TokenStream, item: TokenStream) -> TokenStream {
 ///   - note: `arg` is the type of the argument
 /// - `#[arg(stdin)]` -> Parse the argument from stdin when using the CLI
 ///   - `custom_parse_fn :: Into<RpcError> err => (&[u8], &ArgMatches<'_>) -> Result<arg, err>`
+/// - `#[arg(count)]` -> Treat argument as flag, count occurrences
+/// - `#[arg(multiple)]` -> Allow the arg to be specified multiple times. Collect the args after parsing.
 #[proc_macro_attribute]
 pub fn arg(_: TokenStream, _: TokenStream) -> TokenStream {
     syn::Error::new(

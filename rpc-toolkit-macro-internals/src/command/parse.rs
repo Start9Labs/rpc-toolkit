@@ -317,7 +317,7 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
     Ok(opt)
 }
 
-pub fn parse_arg_attr(attr: Attribute, arg: PatType, has_stdin: &mut bool) -> Result<ArgOptions> {
+pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
     let arg_span = arg.span();
     let mut opt = ArgOptions {
         ty: *arg.ty,
@@ -331,7 +331,9 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType, has_stdin: &mut bool) -> Re
         short: None,
         long: None,
         parse: None,
-        stdin: false,
+        count: None,
+        multiple: None,
+        stdin: None,
     };
     match attr.parse_meta()? {
         Meta::List(list) => {
@@ -370,9 +372,6 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType, has_stdin: &mut bool) -> Re
                         return Err(Error::new(nv.path.span(), "`parse` cannot be assigned to"));
                     }
                     NestedMeta::Meta(Meta::Path(p)) if p.is_ident("stdin") => {
-                        if *has_stdin {
-                            return Err(Error::new(p.span(), "duplicate argument `stdin`"));
-                        }
                         if opt.short.is_some() {
                             return Err(Error::new(
                                 p.span(),
@@ -391,8 +390,19 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType, has_stdin: &mut bool) -> Re
                                 "`stdin` and `help` are mutually exclusive",
                             ));
                         }
-                        opt.stdin = true;
-                        *has_stdin = true;
+                        if opt.count.is_some() {
+                            return Err(Error::new(
+                                p.span(),
+                                "`stdin` and `count` are mutually exclusive",
+                            ));
+                        }
+                        if opt.multiple.is_some() {
+                            return Err(Error::new(
+                                p.span(),
+                                "`stdin` and `multiple` are mutually exclusive",
+                            ));
+                        }
+                        opt.stdin = Some(p);
                     }
                     NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("stdin") => {
                         return Err(Error::new(
@@ -403,12 +413,60 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType, has_stdin: &mut bool) -> Re
                     NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("stdin") => {
                         return Err(Error::new(nv.path.span(), "`stdin` cannot be assigned to"));
                     }
+                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("count") => {
+                        if opt.stdin.is_some() {
+                            return Err(Error::new(
+                                p.span(),
+                                "`stdin` and `count` are mutually exclusive",
+                            ));
+                        }
+                        if opt.multiple.is_some() {
+                            return Err(Error::new(
+                                p.span(),
+                                "`count` and `multiple` are mutually exclusive",
+                            ));
+                        }
+                        opt.count = Some(p);
+                    }
+                    NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("count") => {
+                        return Err(Error::new(
+                            list.path.span(),
+                            "`count` does not take any arguments",
+                        ));
+                    }
+                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("count") => {
+                        return Err(Error::new(nv.path.span(), "`count` cannot be assigned to"));
+                    }
+                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("multiple") => {
+                        if opt.stdin.is_some() {
+                            return Err(Error::new(
+                                p.span(),
+                                "`stdin` and `multiple` are mutually exclusive",
+                            ));
+                        }
+                        if opt.count.is_some() {
+                            return Err(Error::new(
+                                p.span(),
+                                "`count` and `multiple` are mutually exclusive",
+                            ));
+                        }
+                        opt.multiple = Some(p);
+                    }
+                    NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("multiple") => {
+                        return Err(Error::new(
+                            list.path.span(),
+                            "`multiple` does not take any arguments",
+                        ));
+                    }
+                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("count") => {
+                        return Err(Error::new(nv.path.span(), "`count` cannot be assigned to"));
+                    }
                     NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("help") => {
                         if let Lit::Str(help) = nv.lit {
                             if opt.help.is_some() {
                                 return Err(Error::new(help.span(), "duplicate argument `help`"));
                             }
-                            if opt.stdin {
+                            if opt.stdin.is_some() {
                                 return Err(Error::new(
                                     help.span(),
                                     "`stdin` and `help` are mutually exclusive",
@@ -464,7 +522,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType, has_stdin: &mut bool) -> Re
                             if opt.short.is_some() {
                                 return Err(Error::new(short.span(), "duplicate argument `short`"));
                             }
-                            if opt.stdin {
+                            if opt.stdin.is_some() {
                                 return Err(Error::new(
                                     short.span(),
                                     "`stdin` and `short` are mutually exclusive",
@@ -489,7 +547,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType, has_stdin: &mut bool) -> Re
                             if opt.long.is_some() {
                                 return Err(Error::new(long.span(), "duplicate argument `long`"));
                             }
-                            if opt.stdin {
+                            if opt.stdin.is_some() {
                                 return Err(Error::new(
                                     long.span(),
                                     "`stdin` and `long` are mutually exclusive",
@@ -529,7 +587,6 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType, has_stdin: &mut bool) -> Re
 
 pub fn parse_param_attrs(item: &mut ItemFn) -> Result<Vec<ParamType>> {
     let mut params = Vec::new();
-    let mut has_stdin = false;
     for param in item.sig.inputs.iter_mut() {
         if let FnArg::Typed(param) = param {
             let mut ty = ParamType::None;
@@ -538,7 +595,7 @@ pub fn parse_param_attrs(item: &mut ItemFn) -> Result<Vec<ParamType>> {
                 if param.attrs[i].path.is_ident("arg") {
                     let attr = param.attrs.remove(i);
                     if matches!(ty, ParamType::None) {
-                        ty = ParamType::Arg(parse_arg_attr(attr, param.clone(), &mut has_stdin)?);
+                        ty = ParamType::Arg(parse_arg_attr(attr, param.clone())?);
                     } else if matches!(ty, ParamType::Arg(_)) {
                         return Err(Error::new(
                             attr.span(),

@@ -76,7 +76,9 @@ pub struct ArgOptions {
     short: Option<LitStr>,
     long: Option<LitStr>,
     parse: Option<Path>,
-    stdin: bool,
+    count: Option<Path>,
+    multiple: Option<Path>,
+    stdin: Option<Path>,
 }
 
 pub enum ParamType {

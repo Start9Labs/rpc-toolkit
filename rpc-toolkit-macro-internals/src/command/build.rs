@@ -31,7 +31,7 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
         .iter_mut()
         .filter_map(|param| {
             if let ParamType::Arg(arg) = param {
-                if arg.stdin {
+                if arg.stdin.is_some() {
                     return None;
                 }
                 let name = arg.name.clone().unwrap();
@@ -50,18 +50,27 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
                         modifications.extend(quote_spanned! { ty_span =>
                             arg = arg.takes_value(false);
                         });
+                    } else if arg.count.is_some() {
+                        modifications.extend(quote_spanned! { ty_span =>
+                            arg = arg.takes_value(false);
+                            arg = arg.multiple(true);
+                        });
                     } else {
                         modifications.extend(quote_spanned! { ty_span =>
                             arg = arg.takes_value(true);
                         });
-                        if p.path.segments.last().unwrap().ident != "Option" {
-                            modifications.extend(quote_spanned! { ty_span =>
-                                arg = arg.required(true);
-                            });
-                        } else {
+                        if p.path.segments.last().unwrap().ident == "Option" {
                             arg.optional = true;
                             modifications.extend(quote_spanned! { ty_span =>
                                 arg = arg.required(false);
+                            });
+                        } else if arg.multiple.is_some() {
+                            modifications.extend(quote_spanned! { ty_span =>
+                                arg = arg.multiple(true);
+                            });
+                        } else {
+                            modifications.extend(quote_spanned! { ty_span =>
+                                arg = arg.required(true);
                             });
                         }
                     }
@@ -483,7 +492,7 @@ fn cli_handler(
             let name = arg.name.clone().unwrap();
             let arg_name = LitStr::new(&name.to_string(), name.span());
             let field_name = Ident::new(&format!("arg_{}", name), name.span());
-            if arg.stdin {
+            if arg.stdin.is_some() {
                 quote! {
                     #field_name: rpc_toolkit_prelude::default_stdin_parser(&mut std::io::stdin(), matches)?,
                 }
@@ -491,29 +500,37 @@ fn cli_handler(
                 quote! {
                     #field_name: matches.is_present(#arg_name),
                 }
+            } else if arg.count.is_some() {
+                quote! {
+                    #field_name: matches.occurrences_of(#arg_name),
+                }
             } else {
                 let parse_val = if let Some(parse) = &arg.parse {
                     quote! {
-                        #parse(arg_val, matches)?
+                        #parse(arg_val, matches)
                     }
                 } else {
                     quote! {
-                        rpc_toolkit_prelude::default_arg_parser(arg_val, matches)?
+                        rpc_toolkit_prelude::default_arg_parser(arg_val, matches)
                     }
                 };
                 if arg.optional {
                     quote! {
                         #field_name: if let Some(arg_val) = matches.value_of(#arg_name) {
-                            Some(#parse_val)
+                            Some(#parse_val?)
                         } else {
                             None
                         },
+                    }
+                } else if arg.multiple.is_some() {
+                    quote! {
+                        #field_name: matches.values_of(#arg_name).iter().flatten().map(|arg_val| #parse_val).collect::<Result<_, _>>()?,
                     }
                 } else {
                     quote! {
                         #field_name: {
                             let arg_val = matches.value_of(#arg_name).unwrap();
-                            #parse_val
+                            #parse_val?
                         },
                     }
                 }
