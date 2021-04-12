@@ -98,11 +98,15 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
         })
         .collect::<Vec<_>>();
     let required = LitBool::new(subcommand_required, Span::call_site());
+    let alias = &opt.common().aliases;
     quote! {
         pub fn build_app() -> rpc_toolkit_prelude::App<'static, 'static> {
             let mut app = rpc_toolkit_prelude::App::new(#name);
             #(
                 app = app.about(#about);
+            )*
+            #(
+                app = app.alias(#alias);
             )*
             #(
                 app = app.arg(#arg);

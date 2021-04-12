@@ -126,6 +126,30 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                     "`display` cannot be assigned to",
                 ));
             }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("aliases") => {
+                if !opt.common().aliases.is_empty() {
+                    return Err(Error::new(list.span(), "duplicate argument `alias`"));
+                }
+                for nested in list.nested {
+                    match nested {
+                        NestedMeta::Lit(Lit::Str(alias)) => opt.common().aliases.push(alias),
+                        a => return Err(Error::new(a.span(), "`alias` must be a string")),
+                    }
+                }
+            }
+            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("alias") => {
+                return Err(Error::new(p.span(), "`alias` requires an argument"));
+            }
+            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("alias") => {
+                if !opt.common().aliases.is_empty() {
+                    return Err(Error::new(nv.path.span(), "duplicate argument `alias`"));
+                }
+                if let Lit::Str(alias) = nv.lit {
+                    opt.common().aliases.push(alias);
+                } else {
+                    return Err(Error::new(nv.lit.span(), "`alias` must be a string"));
+                }
+            }
             NestedMeta::Meta(Meta::Path(p)) if p.is_ident("cli_only") => {
                 match &opt.common().exec_ctx {
                     ExecutionContext::Standard => {

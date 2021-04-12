@@ -19,6 +19,7 @@ impl Default for ExecutionContext {
 pub struct LeafOptions {
     blocking: Option<Path>,
     is_async: bool,
+    aliases: Vec<LitStr>,
     about: Option<LitStr>,
     rename: Option<Ident>,
     exec_ctx: ExecutionContext,

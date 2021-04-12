@@ -10,6 +10,8 @@ pub fn command(args: TokenStream, item: TokenStream) -> TokenStream {
 
 /// `#[arg(...)]` -> Take this argument as a parameter
 /// - `#[arg(help = "Help text")]` -> Set help text for the arg
+/// - `#[arg(alias = "ls")]` -> Set the alias `ls` in the CLI
+/// - `#[arg(aliases("show", "ls"))]` -> Set the aliases `ls` and `show` in the CLI
 /// - `#[arg(rename = "new_name")]` -> Set the name of the arg to `new_name` in the RPC and CLI
 /// - `#[arg(short = "a")]` -> Set the "short" representation of the arg to `-a` on the CLI
 /// - `#[arg(long = "arg")]` -> Set the "long" representation of the arg to `--arg` on the CLI
