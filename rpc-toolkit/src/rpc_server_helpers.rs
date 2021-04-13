@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use hyper::body::Buf;
 use hyper::server::conn::AddrIncoming;
 use hyper::server::{Builder, Server};
@@ -20,18 +18,14 @@ lazy_static! {
         serde_json::to_vec(&RpcResponse::<AnyRpcMethod<'static>>::from(yajrc::INTERNAL_ERROR)).unwrap();
 }
 
-pub fn make_builder<Ctx: Context>(ctx: &Ctx) -> (Builder<AddrIncoming>, PhantomData<Ctx>) {
+pub fn make_builder<Ctx: Context>(ctx: &Ctx) -> Builder<AddrIncoming> {
     let addr = match ctx.host() {
         Host::Ipv4(ip) => (ip, ctx.port()).into(),
         Host::Ipv6(ip) => (ip, ctx.port()).into(),
         Host::Domain(localhost) if localhost == "localhost" => ([127, 0, 0, 1], ctx.port()).into(),
         _ => ([0, 0, 0, 0], ctx.port()).into(),
     };
-    (Server::bind(&addr), PhantomData)
-}
-
-pub fn bind_type<T>(_phantom: PhantomData<T>, actual: T) -> T {
-    actual
+    Server::bind(&addr)
 }
 
 pub async fn make_request<Params: for<'de> Deserialize<'de> + 'static>(

@@ -22,7 +22,7 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
         {
             let ctx = #ctx;
             let status_fn = #status_fn;
-            let (builder, ctx_phantom) = rpc_toolkit::rpc_server_helpers::make_builder(&ctx);
+            let builder = rpc_toolkit::rpc_server_helpers::make_builder(&ctx);
             let make_svc = rpc_toolkit::hyper::service::make_service_fn(move |_| {
                 let ctx = ctx.clone();
                 async move {
@@ -36,7 +36,7 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
                                     Ok(rpc_req) => Ok((
                                         rpc_req.id,
                                         #command(
-                                            rpc_toolkit::rpc_server_helpers::bind_type(ctx_phantom, ctx),
+                                            ctx,
                                             rpc_toolkit::yajrc::RpcMethod::as_str(&rpc_req.method),
                                             rpc_req.params,
                                         )
