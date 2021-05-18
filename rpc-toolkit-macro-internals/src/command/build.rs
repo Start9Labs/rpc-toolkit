@@ -285,7 +285,7 @@ fn rpc_handler(
                 method: &str,
                 _args: Params#param_ty_generics,
             ) -> Result<rpc_toolkit_prelude::Value, rpc_toolkit_prelude::RpcError> {
-                Err(RpcError {
+                Err(rpc_toolkit_prelude::RpcError {
                     data: Some(method.into()),
                     ..rpc_toolkit_prelude::yajrc::METHOD_NOT_FOUND_ERROR
                 })
@@ -353,7 +353,7 @@ fn rpc_handler(
                     #(
                         #subcmd_impl,
                     )*
-                    _ => Err(RpcError {
+                    _ => Err(rpc_toolkit_prelude::RpcError {
                         data: Some(method.into()),
                         ..rpc_toolkit_prelude::yajrc::METHOD_NOT_FOUND_ERROR
                     })
@@ -560,7 +560,7 @@ fn cli_handler(
         let rt_ref = if let Some(rt) = rt.as_mut() {
             &*rt
         } else {
-            rt = Some(rpc_toolkit_prelude::Runtime::new().map_err(|e| RpcError {
+            rt = Some(rpc_toolkit_prelude::Runtime::new().map_err(|e| rpc_toolkit_prelude::RpcError {
                 data: Some(format!("{}", e).into()),
                 ..rpc_toolkit_prelude::yajrc::INTERNAL_ERROR
             })?);
@@ -581,7 +581,7 @@ fn cli_handler(
                 method: rpc_toolkit_prelude::Cow<'_, str>,
                 _parent_params: ParentParams,
             ) -> Result<(), rpc_toolkit_prelude::RpcError> {
-                Err(RpcError {
+                Err(rpc_toolkit_prelude::RpcError {
                     data: Some(method.into()),
                     ..rpc_toolkit_prelude::yajrc::METHOD_NOT_FOUND_ERROR
                 })
@@ -765,7 +765,7 @@ fn cli_handler(
                     }
                 }
                 _ => quote! {
-                    Err(RpcError {
+                    Err(rpc_toolkit_prelude::RpcError {
                         data: Some(method.into()),
                         ..rpc_toolkit_prelude::yajrc::METHOD_NOT_FOUND_ERROR
                     }),
