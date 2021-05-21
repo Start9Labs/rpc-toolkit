@@ -497,8 +497,14 @@ fn cli_handler(
             let arg_name = LitStr::new(&name.to_string(), name.span());
             let field_name = Ident::new(&format!("arg_{}", name), name.span());
             if arg.stdin.is_some() {
-                quote! {
-                    #field_name: rpc_toolkit_prelude::default_stdin_parser(&mut std::io::stdin(), matches)?,
+                if let Some(parse) = &arg.parse {
+                    quote! {
+                        #field_name: #parse(&mut std::io::stdin(), matches)?,
+                    }
+                } else {
+                    quote! {
+                        #field_name: rpc_toolkit_prelude::default_stdin_parser(&mut std::io::stdin(), matches)?,
+                    }
                 }
             } else if arg.check_is_present {
                 quote! {
