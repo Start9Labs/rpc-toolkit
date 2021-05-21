@@ -123,6 +123,6 @@ pub fn default_stdin_parser<T: FromStr<Err = E>, E: Display>(
     })
 }
 
-pub fn default_display<T: Display>(t: T) {
+pub fn default_display<T: Display>(t: T, _: &ArgMatches<'_>) {
     println!("{}", t)
 }

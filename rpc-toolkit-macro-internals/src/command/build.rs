@@ -618,7 +618,7 @@ fn cli_handler(
                     };
 
                     let res = rt_ref.block_on(rpc_toolkit_prelude::call_remote(ctx, method.as_ref(), params, return_ty))?;
-                    Ok(#display(res.result?))
+                    Ok(#display(res.result?, matches))
                 }
             }
         }
@@ -634,11 +634,11 @@ fn cli_handler(
             };
             let display_res = if let Some(display_fn) = &opt.display {
                 quote! {
-                    #display_fn(#invocation)
+                    #display_fn(#invocation, matches)
                 }
             } else {
                 quote! {
-                    rpc_toolkit_prelude::default_display(#invocation)
+                    rpc_toolkit_prelude::default_display(#invocation, matches)
                 }
             };
             let rt_action = if opt.is_async {
@@ -726,7 +726,7 @@ fn cli_handler(
                         }
                     };
                     quote! {
-                        Ok(#display(#self_impl)),
+                        Ok(#display(#self_impl, matches)),
                     }
                 }
                 (Some(self_impl), ExecutionContext::Standard) => {
@@ -760,7 +760,7 @@ fn cli_handler(
                             };
 
                             let res = rt_ref.block_on(rpc_toolkit_prelude::call_remote(ctx, method.as_ref(), params, return_ty))?;
-                            Ok(#display(res.result?))
+                            Ok(#display(res.result?, matches))
                         }
                     }
                 }
