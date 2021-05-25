@@ -74,6 +74,7 @@ pub struct ArgOptions {
     check_is_present: bool,
     help: Option<LitStr>,
     name: Option<Ident>,
+    rename: Option<Ident>,
     short: Option<LitStr>,
     long: Option<LitStr>,
     parse: Option<Path>,

@@ -352,6 +352,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
             Pat::Ident(i) => Some(i.ident),
             _ => None,
         },
+        rename: None,
         short: None,
         long: None,
         parse: None,
@@ -512,13 +513,13 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                     }
                     NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("rename") => {
                         if let Lit::Str(rename) = nv.lit {
-                            if opt.name.is_some() {
+                            if opt.rename.is_some() {
                                 return Err(Error::new(
                                     rename.span(),
                                     "duplicate argument `rename`",
                                 ));
                             }
-                            opt.name = Some(
+                            opt.rename = Some(
                                 syn::parse_str(&rename.value())
                                     .map_err(|e| Error::new(rename.span(), format!("{}", e)))?,
                             );
@@ -600,6 +601,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
         Meta::Path(_) => (),
         Meta::NameValue(nv) => return Err(Error::new(nv.span(), "`arg` cannot be assigned to")),
     }
+    opt.name = opt.name.or(opt.rename.clone());
     if opt.name.is_none() {
         return Err(Error::new(
             arg_span,
