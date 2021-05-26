@@ -291,10 +291,7 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                     if opt.common().rename.is_some() {
                         return Err(Error::new(rename.span(), "duplicate argument `rename`"));
                     }
-                    opt.common().rename = Some(
-                        syn::parse_str(&rename.value())
-                            .map_err(|e| Error::new(rename.span(), format!("{}", e)))?,
-                    );
+                    opt.common().rename = Some(rename);
                 } else {
                     return Err(Error::new(nv.lit.span(), "`rename` must be a string"));
                 }
@@ -519,10 +516,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                                     "duplicate argument `rename`",
                                 ));
                             }
-                            opt.rename = Some(
-                                syn::parse_str(&rename.value())
-                                    .map_err(|e| Error::new(rename.span(), format!("{}", e)))?,
-                            );
+                            opt.rename = Some(rename);
                         } else {
                             return Err(Error::new(nv.lit.span(), "`rename` must be a string"));
                         }
@@ -601,7 +595,6 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
         Meta::Path(_) => (),
         Meta::NameValue(nv) => return Err(Error::new(nv.span(), "`arg` cannot be assigned to")),
     }
-    opt.name = opt.name.or(opt.rename.clone());
     if opt.name.is_none() {
         return Err(Error::new(
             arg_span,

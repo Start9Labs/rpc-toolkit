@@ -21,7 +21,7 @@ pub struct LeafOptions {
     is_async: bool,
     aliases: Vec<LitStr>,
     about: Option<LitStr>,
-    rename: Option<Ident>,
+    rename: Option<LitStr>,
     exec_ctx: ExecutionContext,
     display: Option<Path>,
 }
@@ -74,7 +74,7 @@ pub struct ArgOptions {
     check_is_present: bool,
     help: Option<LitStr>,
     name: Option<Ident>,
-    rename: Option<Ident>,
+    rename: Option<LitStr>,
     short: Option<LitStr>,
     long: Option<LitStr>,
     parse: Option<Path>,

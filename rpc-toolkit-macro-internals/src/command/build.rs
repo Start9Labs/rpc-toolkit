@@ -35,7 +35,7 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
                     return None;
                 }
                 let name = arg.name.clone().unwrap();
-                let name_str = LitStr::new(&name.to_string(), name.span());
+                let name_str = arg.rename.clone().unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
                 let help = arg.help.clone().into_iter();
                 let short = arg.short.clone().into_iter();
                 let long = arg.long.clone().into_iter();
@@ -77,7 +77,7 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
                 };
                 Some(quote! {
                     {
-                        let mut arg = rpc_toolkit_prelude::Arg::with_name(#name_str);
+                        let mut arg = ::rpc_toolkit::command_helpers::prelude::Arg::with_name(#name_str);
                         #(
                             arg = arg.help(#help);
                         )*
@@ -100,8 +100,8 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
     let required = LitBool::new(subcommand_required, Span::call_site());
     let alias = &opt.common().aliases;
     quote! {
-        pub fn build_app() -> rpc_toolkit_prelude::App<'static, 'static> {
-            let mut app = rpc_toolkit_prelude::App::new(#name);
+        pub fn build_app() -> ::rpc_toolkit::command_helpers::prelude::App<'static, 'static> {
+            let mut app = ::rpc_toolkit::command_helpers::prelude::App::new(#name);
             #(
                 app = app.about(#about);
             )*
@@ -115,7 +115,7 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
                 app = app.subcommand(#subcommand::build_app());
             )*
             if #required {
-                app = app.setting(rpc_toolkit_prelude::AppSettings::SubcommandRequired);
+                app = app.setting(::rpc_toolkit::command_helpers::prelude::AppSettings::SubcommandRequired);
             }
             app
         }
@@ -231,7 +231,10 @@ fn rpc_handler(
         match param {
             ParamType::Arg(arg) => {
                 let name = arg.name.clone().unwrap();
-                let rename = LitStr::new(&name.to_string(), name.span());
+                let rename = arg
+                    .rename
+                    .clone()
+                    .unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
                 let field_name = Ident::new(&format!("arg_{}", name), name.span());
                 let ty = arg.ty.clone();
                 param_def.push(quote! {
@@ -257,14 +260,14 @@ fn rpc_handler(
     let param_generics = param_generics_filter.finish();
     let (_, param_ty_generics, _) = param_generics.split_for_impl();
     let param_struct_def = quote! {
-        #[derive(rpc_toolkit_prelude::Deserialize)]
+        #[derive(::rpc_toolkit::command_helpers::prelude::Deserialize)]
         pub struct Params#param_ty_generics {
             #(
                 #param_def
             )*
             #[serde(flatten)]
             #[serde(default)]
-            rest: rpc_toolkit_prelude::Value,
+            rest: ::rpc_toolkit::command_helpers::prelude::Value,
         }
     };
     let param = params.iter().map(|param| match param {
@@ -284,10 +287,10 @@ fn rpc_handler(
                 _ctx: #ctx_ty,
                 method: &str,
                 _args: Params#param_ty_generics,
-            ) -> Result<rpc_toolkit_prelude::Value, rpc_toolkit_prelude::RpcError> {
-                Err(rpc_toolkit_prelude::RpcError {
+            ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
+                Err(::rpc_toolkit::command_helpers::prelude::RpcError {
                     data: Some(method.into()),
-                    ..rpc_toolkit_prelude::yajrc::METHOD_NOT_FOUND_ERROR
+                    ..::rpc_toolkit::command_helpers::prelude::yajrc::METHOD_NOT_FOUND_ERROR
                 })
             }
         },
@@ -298,7 +301,7 @@ fn rpc_handler(
                 }
             } else if opt.blocking.is_some() {
                 quote! {
-                    rpc_toolkit_prelude::spawn_blocking(move || #fn_path(#(#param),*)).await?
+                    ::rpc_toolkit::command_helpers::prelude::spawn_blocking(move || #fn_path(#(#param),*)).await?
                 }
             } else {
                 quote! {
@@ -312,8 +315,8 @@ fn rpc_handler(
                     ctx: #ctx_ty,
                     method: &str,
                     args: Params#param_ty_generics,
-                ) -> Result<rpc_toolkit_prelude::Value, rpc_toolkit_prelude::RpcError> {
-                    Ok(rpc_toolkit_prelude::to_value(#invocation)?)
+                ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
+                    Ok(::rpc_toolkit::command_helpers::prelude::to_value(#invocation)?)
                 }
             }
         }
@@ -328,7 +331,7 @@ fn rpc_handler(
                 }
             } else if common.blocking.is_some() {
                 quote! {
-                    let ctx = rpc_toolkit_prelude::spawn_blocking(move || #fn_path(#(#param),*)).await?;
+                    let ctx = ::rpc_toolkit::command_helpers::prelude::spawn_blocking(move || #fn_path(#(#param),*)).await?;
                 }
             } else {
                 quote! {
@@ -345,7 +348,7 @@ fn rpc_handler(
                     ),
                 };
                 quote_spanned!{ subcommand.span() =>
-                    [#subcommand::NAME, rest] => #subcommand::#rpc_handler(ctx, rest, rpc_toolkit_prelude::from_value(args.rest)?).await
+                    [#subcommand::NAME, rest] => #subcommand::#rpc_handler(ctx, rest, ::rpc_toolkit::command_helpers::prelude::from_value(args.rest)?).await
                 }
             });
             let subcmd_impl = quote! {
@@ -353,9 +356,9 @@ fn rpc_handler(
                     #(
                         #subcmd_impl,
                     )*
-                    _ => Err(rpc_toolkit_prelude::RpcError {
+                    _ => Err(::rpc_toolkit::command_helpers::prelude::RpcError {
                         data: Some(method.into()),
-                        ..rpc_toolkit_prelude::yajrc::METHOD_NOT_FOUND_ERROR
+                        ..::rpc_toolkit::command_helpers::prelude::yajrc::METHOD_NOT_FOUND_ERROR
                     })
                 }
             };
@@ -368,7 +371,7 @@ fn rpc_handler(
                         }
                     } else if self_impl.blocking {
                         quote_spanned! { self_impl_fn.span() =>
-                            rpc_toolkit_prelude::spawn_blocking(move || #self_impl_fn(ctx)).await?
+                            ::rpc_toolkit::command_helpers::prelude::spawn_blocking(move || #self_impl_fn(ctx)).await?
                         }
                     } else {
                         quote_spanned! { self_impl_fn.span() =>
@@ -382,11 +385,11 @@ fn rpc_handler(
                             ctx: #ctx_ty,
                             method: &str,
                             args: Params#param_ty_generics,
-                        ) -> Result<rpc_toolkit_prelude::Value, rpc_toolkit_prelude::RpcError> {
+                        ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
                             #cmd_preprocess
 
                             if method.is_empty() {
-                                Ok(rpc_toolkit_prelude::to_value(&#self_impl)?)
+                                Ok(::rpc_toolkit::command_helpers::prelude::to_value(&#self_impl)?)
                             } else {
                                 #subcmd_impl
                             }
@@ -401,7 +404,7 @@ fn rpc_handler(
                             ctx: #ctx_ty,
                             method: &str,
                             args: Params#param_ty_generics,
-                        ) -> Result<rpc_toolkit_prelude::Value, rpc_toolkit_prelude::RpcError> {
+                        ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
                             #cmd_preprocess
 
                             #subcmd_impl
@@ -430,7 +433,7 @@ fn cli_handler(
     }
     let mut generics = fn_generics.clone();
     generics.params.push(macro_try!(syn::parse2(
-        quote! { ParentParams: rpc_toolkit_prelude::Serialize }
+        quote! { ParentParams: ::rpc_toolkit::command_helpers::prelude::Serialize }
     )));
     if generics.lt_token.is_none() {
         generics.lt_token = Some(Default::default());
@@ -458,7 +461,7 @@ fn cli_handler(
     }
     let mut param_generics = param_generics_filter.finish();
     param_generics.params.push(macro_try!(syn::parse2(quote! {
-        ParentParams: rpc_toolkit_prelude::Serialize
+        ParentParams: ::rpc_toolkit::command_helpers::prelude::Serialize
     })));
     if param_generics.lt_token.is_none() {
         generics.lt_token = Some(Default::default());
@@ -472,7 +475,10 @@ fn cli_handler(
         match param {
             ParamType::Arg(arg) => {
                 let name = arg.name.clone().unwrap();
-                let rename = LitStr::new(&name.to_string(), name.span());
+                let rename = arg
+                    .rename
+                    .clone()
+                    .unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
                 let field_name = Ident::new(&format!("arg_{}", name), name.span());
                 let ty = arg.ty.clone();
                 arg_def.push(quote! {
@@ -494,7 +500,7 @@ fn cli_handler(
         })
         .map(|arg| {
             let name = arg.name.clone().unwrap();
-            let arg_name = LitStr::new(&name.to_string(), name.span());
+            let arg_name = arg.rename.clone().unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
             let field_name = Ident::new(&format!("arg_{}", name), name.span());
             if arg.stdin.is_some() {
                 if let Some(parse) = &arg.parse {
@@ -503,7 +509,7 @@ fn cli_handler(
                     }
                 } else {
                     quote! {
-                        #field_name: rpc_toolkit_prelude::default_stdin_parser(&mut std::io::stdin(), matches)?,
+                        #field_name: ::rpc_toolkit::command_helpers::prelude::default_stdin_parser(&mut std::io::stdin(), matches)?,
                     }
                 }
             } else if arg.check_is_present {
@@ -521,7 +527,7 @@ fn cli_handler(
                     }
                 } else {
                     quote! {
-                        rpc_toolkit_prelude::default_arg_parser(arg_val, matches)
+                        ::rpc_toolkit::command_helpers::prelude::default_arg_parser(arg_val, matches)
                     }
                 };
                 if arg.optional {
@@ -547,7 +553,7 @@ fn cli_handler(
             }
         });
     let param_struct_def = quote! {
-        #[derive(rpc_toolkit_prelude::Serialize)]
+        #[derive(::rpc_toolkit::command_helpers::prelude::Serialize)]
         struct Params#param_ty_generics {
             #(
                 #arg_def
@@ -566,9 +572,9 @@ fn cli_handler(
         let rt_ref = if let Some(rt) = rt.as_mut() {
             &*rt
         } else {
-            rt = Some(rpc_toolkit_prelude::Runtime::new().map_err(|e| rpc_toolkit_prelude::RpcError {
+            rt = Some(::rpc_toolkit::command_helpers::prelude::Runtime::new().map_err(|e| ::rpc_toolkit::command_helpers::prelude::RpcError {
                 data: Some(format!("{}", e).into()),
-                ..rpc_toolkit_prelude::yajrc::INTERNAL_ERROR
+                ..::rpc_toolkit::command_helpers::prelude::yajrc::INTERNAL_ERROR
             })?);
             rt.as_ref().unwrap()
         };
@@ -576,20 +582,20 @@ fn cli_handler(
     let display = if let Some(display) = &opt.common().display {
         quote! { #display }
     } else {
-        quote! { rpc_toolkit_prelude::default_display }
+        quote! { ::rpc_toolkit::command_helpers::prelude::default_display }
     };
     match opt {
         Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::RpcOnly(_)) => quote! {
             pub fn cli_handler#generics(
                 _ctx: #ctx_ty,
-                _rt: Option<rpc_toolkit_prelude::Runtime>,
-                _matches: &rpc_toolkit_prelude::ArgMatches<'_>,
-                method: rpc_toolkit_prelude::Cow<'_, str>,
+                _rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
+                _matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                 _parent_params: ParentParams,
-            ) -> Result<(), rpc_toolkit_prelude::RpcError> {
-                Err(rpc_toolkit_prelude::RpcError {
+            ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
+                Err(::rpc_toolkit::command_helpers::prelude::RpcError {
                     data: Some(method.into()),
-                    ..rpc_toolkit_prelude::yajrc::METHOD_NOT_FOUND_ERROR
+                    ..::rpc_toolkit::command_helpers::prelude::yajrc::METHOD_NOT_FOUND_ERROR
                 })
             }
         },
@@ -607,23 +613,23 @@ fn cli_handler(
             quote! {
                 pub fn cli_handler#generics(
                     ctx: #ctx_ty,
-                    mut rt: Option<rpc_toolkit_prelude::Runtime>,
-                    matches: &rpc_toolkit_prelude::ArgMatches<'_>,
-                    method: rpc_toolkit_prelude::Cow<'_, str>,
+                    mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
+                    matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                    method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                     parent_params: ParentParams,
-                ) -> Result<(), rpc_toolkit_prelude::RpcError> {
+                ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
                     #param_struct_def
 
                     #create_rt
 
                     #[allow(unreachable_code)]
                     let return_ty = if true {
-                        rpc_toolkit_prelude::PhantomData
+                        ::rpc_toolkit::command_helpers::prelude::PhantomData
                     } else {
-                        rpc_toolkit_prelude::make_phantom(#invocation)
+                        ::rpc_toolkit::command_helpers::prelude::make_phantom(#invocation)
                     };
 
-                    let res = rt_ref.block_on(rpc_toolkit_prelude::call_remote(ctx, method.as_ref(), params, return_ty))?;
+                    let res = rt_ref.block_on(::rpc_toolkit::command_helpers::prelude::call_remote(ctx, method.as_ref(), params, return_ty))?;
                     Ok(#display(res.result?, matches))
                 }
             }
@@ -644,7 +650,7 @@ fn cli_handler(
                 }
             } else {
                 quote! {
-                    rpc_toolkit_prelude::default_display(#invocation, matches)
+                    ::rpc_toolkit::command_helpers::prelude::default_display(#invocation, matches)
                 }
             };
             let rt_action = if opt.is_async {
@@ -657,11 +663,11 @@ fn cli_handler(
             quote! {
                 pub fn cli_handler#generics(
                     ctx: #ctx_ty,
-                    mut rt: Option<rpc_toolkit_prelude::Runtime>,
-                    matches: &rpc_toolkit_prelude::ArgMatches<'_>,
-                    _method: rpc_toolkit_prelude::Cow<'_, str>,
+                    mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
+                    matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                    _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                     _parent_params: ParentParams
-                ) -> Result<(), rpc_toolkit_prelude::RpcError> {
+                ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
                     #rt_action
                     Ok(#display_res)
                 }
@@ -757,34 +763,34 @@ fn cli_handler(
 
                             #[allow(unreachable_code)]
                             let return_ty = if true {
-                                rpc_toolkit_prelude::PhantomData
+                                ::rpc_toolkit::command_helpers::prelude::PhantomData
                             } else {
                                 let ctx_new = unreachable!();
-                                rpc_toolkit_prelude::match_types(&ctx, &ctx_new);
+                                ::rpc_toolkit::command_helpers::prelude::match_types(&ctx, &ctx_new);
                                 let ctx = ctx_new;
-                                rpc_toolkit_prelude::make_phantom(#self_impl?)
+                                ::rpc_toolkit::command_helpers::prelude::make_phantom(#self_impl?)
                             };
 
-                            let res = rt_ref.block_on(rpc_toolkit_prelude::call_remote(ctx, method.as_ref(), params, return_ty))?;
+                            let res = rt_ref.block_on(::rpc_toolkit::command_helpers::prelude::call_remote(ctx, method.as_ref(), params, return_ty))?;
                             Ok(#display(res.result?, matches))
                         }
                     }
                 }
                 _ => quote! {
-                    Err(rpc_toolkit_prelude::RpcError {
+                    Err(::rpc_toolkit::command_helpers::prelude::RpcError {
                         data: Some(method.into()),
-                        ..rpc_toolkit_prelude::yajrc::METHOD_NOT_FOUND_ERROR
+                        ..::rpc_toolkit::command_helpers::prelude::yajrc::METHOD_NOT_FOUND_ERROR
                     }),
                 },
             };
             quote! {
                 pub fn cli_handler#generics(
                     ctx: #ctx_ty,
-                    mut rt: Option<rpc_toolkit_prelude::Runtime>,
-                    matches: &rpc_toolkit_prelude::ArgMatches<'_>,
-                    method: rpc_toolkit_prelude::Cow<'_, str>,
+                    mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
+                    matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                    method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                     parent_params: ParentParams,
-                ) -> Result<(), rpc_toolkit_prelude::RpcError> {
+                ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
                     #param_struct_def
 
                     #cmd_preprocess
@@ -813,12 +819,11 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
     let fn_vis = &item.vis;
     let fn_name = &item.sig.ident;
     let fn_generics = &item.sig.generics;
-    let command_name = opt
+    let command_name_str = opt
         .common()
         .rename
         .clone()
-        .unwrap_or_else(|| fn_name.clone());
-    let command_name_str = LitStr::new(&command_name.to_string(), command_name.span());
+        .unwrap_or_else(|| LitStr::new(&fn_name.to_string(), fn_name.span()));
     let is_async = LitBool::new(
         opt.common().is_async,
         item.sig
@@ -834,7 +839,6 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
         #item
         #fn_vis mod #fn_name {
             use super::*;
-            use rpc_toolkit::command_helpers::prelude as rpc_toolkit_prelude;
 
             pub const NAME: &'static str = #command_name_str;
             pub const ASYNC: bool = #is_async;
@@ -846,6 +850,5 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
             #cli_handler
         }
     };
-    // panic!("{}", res);
     res
 }

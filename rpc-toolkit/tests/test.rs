@@ -2,14 +2,11 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use clap::Arg;
-use rpc_toolkit_macro::run_cli;
-use serde::{Deserialize, Serialize};
-use url::Host;
-use yajrc::RpcError;
-
-pub use crate as rpc_toolkit;
-use crate::{command, rpc_server, Context};
+use rpc_toolkit::clap::Arg;
+use rpc_toolkit::serde::{Deserialize, Serialize};
+use rpc_toolkit::url::Host;
+use rpc_toolkit::yajrc::RpcError;
+use rpc_toolkit::{command, rpc_server, run_cli, Context};
 
 #[derive(Debug, Clone)]
 pub struct AppState<T, U> {
@@ -91,8 +88,6 @@ fn dothething2<U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E>, E: Dis
 async fn test() {
     use tokio::io::AsyncWriteExt;
 
-    use crate as rpc_toolkit;
-
     let seed = Arc::new(ConfigSeed {
         host: Host::parse("localhost").unwrap(),
         port: 8000,
@@ -103,9 +98,10 @@ async fn test() {
         .arg("test")
         .arg("--package")
         .arg("rpc-toolkit")
-        .arg("--lib")
+        .arg("--test")
+        .arg("test")
         .arg("--")
-        .arg("test::cli_test")
+        .arg("cli_test")
         .arg("--exact")
         .arg("--nocapture")
         .arg("--")

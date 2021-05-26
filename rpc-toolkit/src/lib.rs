@@ -46,6 +46,3 @@ pub use crate::context::Context;
 pub mod command_helpers;
 mod context;
 pub mod rpc_server_helpers;
-
-#[cfg(test)]
-mod test;
