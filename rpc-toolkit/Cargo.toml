@@ -21,4 +21,4 @@ serde_json = "1.0.64"
 thiserror = "1.0.24"
 tokio = { version = "1.4.0", features = ["full"] }
 url = "2.2.1"
-yajrc = { version = "*", path = "../../yajrc", git = "https://github.com/dr-bonez/yajrc", branch = "develop" }
+yajrc = { version = "*", path = "../../yajrc" }
