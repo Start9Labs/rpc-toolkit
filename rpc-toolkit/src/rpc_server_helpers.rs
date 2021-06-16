@@ -1,4 +1,8 @@
+use std::future::Future;
+
+use futures::future::BoxFuture;
 use hyper::body::Buf;
+use hyper::http::Error as HttpError;
 use hyper::server::conn::AddrIncoming;
 use hyper::server::{Builder, Server};
 use hyper::{Body, Request, Response, StatusCode};
@@ -58,7 +62,7 @@ pub fn to_response<F: Fn(i32) -> StatusCode>(
     req: &Request<Body>,
     res: Result<(Option<Id>, Result<Value, RpcError>), RpcError>,
     status_code_fn: F,
-) -> Result<Response<Body>, hyper::http::Error> {
+) -> Result<Response<Body>, HttpError> {
     let rpc_res: RpcResponse = match res {
         Ok((id, result)) => RpcResponse { id, result },
         Err(e) => e.into(),
@@ -93,4 +97,41 @@ pub fn to_response<F: Fn(i32) -> StatusCode>(
         Err(e) => status_code_fn(e.code),
     });
     res.body(Body::from(body))
+}
+
+pub type DynMiddleware<'a, 'b, 'c, Params> = Box<
+    dyn FnOnce(
+            &'a mut Request<Body>,
+        ) -> BoxFuture<
+            'a,
+            Result<Result<DynMiddlewareStage2<'b, 'c, Params>, Response<Body>>, HttpError>,
+        > + Send
+        + Sync,
+>;
+pub type DynMiddlewareStage2<'a, 'b, Params> = Box<
+    dyn FnOnce(
+            &'a mut RpcRequest<GenericRpcMethod<String, Params>>,
+        )
+            -> BoxFuture<'a, Result<Result<DynMiddlewareStage3<'b>, Response<Body>>, HttpError>>
+        + Send
+        + Sync,
+>;
+pub type DynMiddlewareStage3<'a> =
+    Box<dyn FnOnce(&'a mut Response<Body>) -> BoxFuture<'a, Result<(), HttpError>> + Send + Sync>;
+
+pub fn constrain_middleware<
+    'a,
+    'b,
+    'c,
+    Params: for<'de> Deserialize<'de> + 'static,
+    ReqFn: Fn(&'a mut Request<Body>) -> ReqFut,
+    ReqFut: Future<Output = Result<Result<RpcReqFn, Response<Body>>, HttpError>> + 'a,
+    RpcReqFn: FnOnce(&'b mut RpcRequest<GenericRpcMethod<String, Params>>) -> RpcReqFut,
+    RpcReqFut: Future<Output = Result<Result<ResFn, Response<Body>>, HttpError>> + 'b,
+    ResFn: FnOnce(&'c mut Response<Body>) -> ResFut,
+    ResFut: Future<Output = Result<(), HttpError>> + 'c,
+>(
+    f: ReqFn,
+) -> ReqFn {
+    f
 }

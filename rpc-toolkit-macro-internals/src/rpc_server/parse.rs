@@ -1,24 +1,45 @@
 use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
 
 use super::*;
 
 impl Parse for RpcServerArgs {
     fn parse(input: ParseStream) -> Result<Self> {
-        let command = input.parse()?;
-        let _: token::Comma = input.parse()?;
-        let ctx = input.parse()?;
-        if !input.is_empty() {
-            let _: token::Comma = input.parse()?;
+        let args;
+        braced!(args in input);
+        let mut command = None;
+        let mut ctx = None;
+        let mut status_fn = None;
+        let mut middleware = Punctuated::new();
+        while !args.is_empty() {
+            let arg_name: syn::Ident = args.parse()?;
+            let _: token::Colon = args.parse()?;
+            match arg_name.to_string().as_str() {
+                "command" => {
+                    command = Some(args.parse()?);
+                }
+                "context" => {
+                    ctx = Some(args.parse()?);
+                }
+                "status" => {
+                    status_fn = Some(args.parse()?);
+                }
+                "middleware" => {
+                    let middlewares;
+                    bracketed!(middlewares in args);
+                    middleware = middlewares.parse_terminated(Expr::parse)?;
+                }
+                _ => return Err(Error::new(arg_name.span(), "unknown argument")),
+            }
+            if !args.is_empty() {
+                let _: token::Comma = args.parse()?;
+            }
         }
-        let status_fn = if !input.is_empty() {
-            Some(input.parse()?)
-        } else {
-            None
-        };
         Ok(RpcServerArgs {
-            command,
-            ctx,
+            command: command.expect("`command` is required"),
+            ctx: ctx.expect("`context` is required"),
             status_fn,
+            middleware,
         })
     }
 }

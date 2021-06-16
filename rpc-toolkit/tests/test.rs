@@ -2,7 +2,12 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use futures::FutureExt;
+use hyper::Request;
 use rpc_toolkit::clap::Arg;
+use rpc_toolkit::hyper::http::Error as HttpError;
+use rpc_toolkit::hyper::{Body, Response};
+use rpc_toolkit::rpc_server_helpers::{DynMiddlewareStage2, DynMiddlewareStage3};
 use rpc_toolkit::serde::{Deserialize, Serialize};
 use rpc_toolkit::url::Host;
 use rpc_toolkit::yajrc::RpcError;
@@ -84,15 +89,46 @@ fn dothething2<U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E>, E: Dis
     ))
 }
 
+async fn cors<'a, 'b, Params: for<'de> Deserialize<'de> + 'static>(
+    req: &mut Request<Body>,
+) -> Result<Result<DynMiddlewareStage2<'a, 'b, Params>, Response<Body>>, HttpError> {
+    if req.method() == hyper::Method::OPTIONS {
+        Ok(Err(Response::builder()
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Body::empty())?))
+    } else {
+        Ok(Ok(Box::new(|_req| {
+            async move {
+                let res: DynMiddlewareStage3 = Box::new(|res| {
+                    async move {
+                        res.headers_mut()
+                            .insert("Access-Control-Allow-Origin", "*".parse()?);
+                        Ok::<_, HttpError>(())
+                    }
+                    .boxed()
+                });
+                Ok::<_, HttpError>(Ok(res))
+            }
+            .boxed()
+        })))
+    }
+}
+
 #[tokio::test]
-async fn test() {
+async fn test_rpc() {
     use tokio::io::AsyncWriteExt;
 
     let seed = Arc::new(ConfigSeed {
         host: Host::parse("localhost").unwrap(),
         port: 8000,
     });
-    let server = rpc_server!(dothething::<String, _>, AppState { seed, data: () });
+    let server = rpc_server!({
+        command: dothething::<String, _>,
+        context: AppState { seed, data: () },
+        middleware: [
+            cors,
+        ],
+    });
     let handle = tokio::spawn(server);
     let mut cmd = tokio::process::Command::new("cargo")
         .arg("test")
