@@ -260,6 +260,7 @@ fn rpc_handler(
     let param_generics = param_generics_filter.finish();
     let (_, param_ty_generics, _) = param_generics.split_for_impl();
     let param_struct_def = quote! {
+        #[allow(dead_code)]
         #[derive(::rpc_toolkit::command_helpers::prelude::Deserialize)]
         pub struct Params#param_ty_generics {
             #(
@@ -666,9 +667,12 @@ fn cli_handler(
                     mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
                     matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
                     _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
-                    _parent_params: ParentParams
+                    parent_params: ParentParams
                 ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
+                    #param_struct_def
+
                     #rt_action
+
                     Ok(#display_res)
                 }
             }
@@ -850,5 +854,6 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
             #cli_handler
         }
     };
+    // panic!("{}", res);
     res
 }

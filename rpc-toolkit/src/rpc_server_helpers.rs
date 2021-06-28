@@ -99,6 +99,7 @@ pub fn to_response<F: Fn(i32) -> StatusCode>(
     res.body(Body::from(body))
 }
 
+// &mut Request<Body> -> Result<Result<Future<&mut RpcRequest<...> -> Future<Result<Result<&mut Response<Body> -> Future<Result<(), HttpError>>, Response<Body>>, HttpError>>>, Response<Body>>, HttpError>
 pub type DynMiddleware<'a, 'b, 'c, Params> = Box<
     dyn FnOnce(
             &'a mut Request<Body>,
