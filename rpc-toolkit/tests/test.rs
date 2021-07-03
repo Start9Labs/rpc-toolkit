@@ -203,7 +203,6 @@ fn cli_example() {
         matches => AppState { seed: Arc::new(ConfigSeed {
             host: Host::parse(matches.value_of("host").unwrap_or("localhost")).unwrap(),
             port: matches.value_of("port").unwrap_or("8000").parse().unwrap(),
-        }), data: () },
-        |code| if code < 0 { 1 } else { code }
+        }), data: () }
     )
 }

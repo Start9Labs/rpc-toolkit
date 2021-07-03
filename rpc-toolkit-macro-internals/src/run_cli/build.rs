@@ -42,30 +42,31 @@ pub fn build(args: RunCliArgs) -> TokenStream {
     } else {
         quote! { &rpc_toolkit_matches }
     };
-    let exit_fn = args
-        .exit_fn
-        .unwrap_or_else(|| syn::parse2(quote! { |code| code }).unwrap());
+    let exit_fn = args.exit_fn.unwrap_or_else(|| {
+        syn::parse2(quote! { |err: ::rpc_toolkit::yajrc::RpcError| {
+            eprintln!("{}", err.message);
+            if let Some(data) = err.data {
+                eprintln!("{}", data);
+            }
+            std::process::exit(err.code);
+        } })
+        .unwrap()
+    });
     quote! {
         {
             let rpc_toolkit_matches = #app.get_matches();
             let rpc_toolkit_ctx = #make_ctx;
-            if let Err(e) = #command_handler(
+            if let Err(err) = #command_handler(
                 rpc_toolkit_ctx,
                 None,
                 &rpc_toolkit_matches,
                 "".into(),
                 (),
             ) {
-                eprintln!("{}", e.message);
-                if let Some(data) = e.data {
-                    eprintln!("{:?}", data);
-                }
-                let exit_fn = #exit_fn;
                 drop(rpc_toolkit_matches);
-                std::process::exit(exit_fn(e.code))
+                (#exit_fn)(err);
             } else {
                 drop(rpc_toolkit_matches);
-                std::process::exit(0)
             }
         }
     }
