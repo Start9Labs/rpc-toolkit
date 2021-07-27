@@ -100,25 +100,29 @@ pub fn to_response<F: Fn(i32) -> StatusCode>(
 }
 
 // &mut Request<Body> -> Result<Result<Future<&mut RpcRequest<...> -> Future<Result<Result<&mut Response<Body> -> Future<Result<(), HttpError>>, Response<Body>>, HttpError>>>, Response<Body>>, HttpError>
-pub type DynMiddleware<'a, 'b, 'c, Params> = Box<
-    dyn FnOnce(
+pub type DynMiddleware<Params> = Box<
+    dyn for<'a> FnOnce(
             &'a mut Request<Body>,
         ) -> BoxFuture<
             'a,
-            Result<Result<DynMiddlewareStage2<'b, 'c, Params>, Response<Body>>, HttpError>,
+            Result<Result<DynMiddlewareStage2<Params>, Response<Body>>, HttpError>,
         > + Send
         + Sync,
 >;
-pub type DynMiddlewareStage2<'a, 'b, Params> = Box<
-    dyn FnOnce(
+pub type DynMiddlewareStage2<Params> = Box<
+    dyn for<'a> FnOnce(
             &'a mut RpcRequest<GenericRpcMethod<String, Params>>,
-        )
-            -> BoxFuture<'a, Result<Result<DynMiddlewareStage3<'b>, Response<Body>>, HttpError>>
+        ) -> BoxFuture<
+            'a,
+            Result<Result<DynMiddlewareStage3, Response<Body>>, HttpError>,
+        > + Send
+        + Sync,
+>;
+pub type DynMiddlewareStage3 = Box<
+    dyn for<'a> FnOnce(&'a mut Response<Body>) -> BoxFuture<'a, Result<(), HttpError>>
         + Send
         + Sync,
 >;
-pub type DynMiddlewareStage3<'a> =
-    Box<dyn FnOnce(&'a mut Response<Body>) -> BoxFuture<'a, Result<(), HttpError>> + Send + Sync>;
 
 pub fn constrain_middleware<
     'a,
