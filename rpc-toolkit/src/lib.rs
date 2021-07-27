@@ -42,7 +42,9 @@ pub use rpc_toolkit_macro::run_cli;
 pub use {clap, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
 
 pub use crate::context::Context;
+pub use crate::metadata::Metadata;
 
 pub mod command_helpers;
 mod context;
+mod metadata;
 pub mod rpc_server_helpers;

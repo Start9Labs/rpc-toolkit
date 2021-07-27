@@ -305,6 +305,47 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
             NestedMeta::Meta(Meta::Path(p)) if p.is_ident("rename") => {
                 return Err(Error::new(p.span(), "`rename` must be assigned to"));
             }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("metadata") => {
+                for meta in list.nested {
+                    match meta {
+                        NestedMeta::Meta(Meta::NameValue(metadata_pair)) => {
+                            let ident = metadata_pair.path.get_ident().ok_or(Error::new(
+                                metadata_pair.path.span(),
+                                "must be an identifier",
+                            ))?;
+                            if opt
+                                .common()
+                                .metadata
+                                .insert(ident.clone(), metadata_pair.lit)
+                                .is_some()
+                            {
+                                return Err(Error::new(
+                                    ident.span(),
+                                    format!("duplicate metadata `{}`", ident),
+                                ));
+                            }
+                        }
+                        a => {
+                            return Err(Error::new(
+                                a.span(),
+                                "`metadata` takes a list of identifiers to be assigned to",
+                            ))
+                        }
+                    }
+                }
+            }
+            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("metadata") => {
+                return Err(Error::new(
+                    p.span(),
+                    "`metadata` takes a list of identifiers to be assigned to",
+                ));
+            }
+            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("metadata") => {
+                return Err(Error::new(
+                    nv.path.span(),
+                    "`metadata` cannot be assigned to",
+                ));
+            }
             _ => {
                 return Err(Error::new(arg.span(), "unknown argument"));
             }

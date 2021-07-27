@@ -1,6 +1,7 @@
 use std::future::Future;
 
 use futures::future::BoxFuture;
+use futures::FutureExt;
 use hyper::body::Buf;
 use hyper::http::Error as HttpError;
 use hyper::server::conn::AddrIncoming;
@@ -12,7 +13,7 @@ use serde_json::Value;
 use url::Host;
 use yajrc::{AnyRpcMethod, GenericRpcMethod, Id, RpcError, RpcRequest, RpcResponse};
 
-use crate::Context;
+use crate::{Context, Metadata};
 
 lazy_static! {
     #[cfg(feature = "cbor")]
@@ -100,15 +101,20 @@ pub fn to_response<F: Fn(i32) -> StatusCode>(
 }
 
 // &mut Request<Body> -> Result<Result<Future<&mut RpcRequest<...> -> Future<Result<Result<&mut Response<Body> -> Future<Result<(), HttpError>>, Response<Body>>, HttpError>>>, Response<Body>>, HttpError>
-pub type DynMiddleware<Params> = Box<
+pub type DynMiddleware<Params, Metadata> = Box<
     dyn for<'a> FnOnce(
             &'a mut Request<Body>,
+            Metadata,
         ) -> BoxFuture<
             'a,
             Result<Result<DynMiddlewareStage2<Params>, Response<Body>>, HttpError>,
         > + Send
         + Sync,
 >;
+pub fn noop<Params: for<'de> Deserialize<'de> + 'static, M: Metadata>() -> DynMiddleware<Params, M>
+{
+    Box::new(|_, _| async { Ok(Ok(noop2())) }.boxed())
+}
 pub type DynMiddlewareStage2<Params> = Box<
     dyn for<'a> FnOnce(
             &'a mut RpcRequest<GenericRpcMethod<String, Params>>,
@@ -118,23 +124,45 @@ pub type DynMiddlewareStage2<Params> = Box<
         > + Send
         + Sync,
 >;
+pub fn noop2<Params: for<'de> Deserialize<'de> + 'static>() -> DynMiddlewareStage2<Params> {
+    Box::new(|_| async { Ok(Ok(noop3())) }.boxed())
+}
 pub type DynMiddlewareStage3 = Box<
+    dyn for<'a> FnOnce(
+            &'a mut Result<Value, RpcError>,
+        ) -> BoxFuture<
+            'a,
+            Result<Result<DynMiddlewareStage4, Response<Body>>, HttpError>,
+        > + Send
+        + Sync,
+>;
+pub fn noop3() -> DynMiddlewareStage3 {
+    Box::new(|_| async { Ok(Ok(noop4())) }.boxed())
+}
+pub type DynMiddlewareStage4 = Box<
     dyn for<'a> FnOnce(&'a mut Response<Body>) -> BoxFuture<'a, Result<(), HttpError>>
         + Send
         + Sync,
 >;
+pub fn noop4() -> DynMiddlewareStage4 {
+    Box::new(|_| async { Ok(()) }.boxed())
+}
 
 pub fn constrain_middleware<
     'a,
     'b,
     'c,
+    'd,
     Params: for<'de> Deserialize<'de> + 'static,
-    ReqFn: Fn(&'a mut Request<Body>) -> ReqFut,
+    M: Metadata,
+    ReqFn: Fn(&'a mut Request<Body>, M) -> ReqFut,
     ReqFut: Future<Output = Result<Result<RpcReqFn, Response<Body>>, HttpError>> + 'a,
     RpcReqFn: FnOnce(&'b mut RpcRequest<GenericRpcMethod<String, Params>>) -> RpcReqFut,
-    RpcReqFut: Future<Output = Result<Result<ResFn, Response<Body>>, HttpError>> + 'b,
-    ResFn: FnOnce(&'c mut Response<Body>) -> ResFut,
-    ResFut: Future<Output = Result<(), HttpError>> + 'c,
+    RpcReqFut: Future<Output = Result<Result<RpcResFn, Response<Body>>, HttpError>> + 'b,
+    RpcResFn: FnOnce(&'c mut Result<Value, RpcError>) -> RpcResFut,
+    RpcResFut: Future<Output = Result<Result<ResFn, Response<Body>>, HttpError>> + 'c,
+    ResFn: FnOnce(&'d mut Response<Body>) -> ResFut,
+    ResFut: Future<Output = Result<(), HttpError>> + 'd,
 >(
     f: ReqFn,
 ) -> ReqFn {

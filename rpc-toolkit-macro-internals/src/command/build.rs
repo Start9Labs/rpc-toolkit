@@ -10,6 +10,172 @@ use syn::token::{Comma, Where};
 use super::parse::*;
 use super::*;
 
+fn metadata(full_options: &Options) -> TokenStream {
+    let options = match full_options {
+        Options::Leaf(a) => a,
+        Options::Parent(ParentOptions { common, .. }) => common,
+    };
+    let fallthrough = |ty: &str| {
+        let getter_name = Ident::new(&format!("get_{}", ty), Span::call_site());
+        match &*full_options {
+            Options::Parent(ParentOptions { subcommands, .. }) => {
+                let subcmd_handler = subcommands.iter().map(|subcmd| {
+                    let mut subcmd = subcmd.clone();
+                    subcmd.segments.last_mut().unwrap().arguments = PathArguments::None;
+                    quote_spanned!{ subcmd.span() =>
+                        [#subcmd::NAME, rest] => if let Some(val) = #subcmd::Metadata.#getter_name(rest, key) {
+                            return Some(val);
+                        },
+                    }
+                });
+                quote! {
+                    if !command.is_empty() {
+                        match command.splitn(2, ".").chain(std::iter::repeat("")).take(2).collect::<Vec<_>>().as_slice() {
+                            #(
+                                #subcmd_handler
+                            )*
+                            _ => ()
+                        }
+                    }
+                }
+            }
+            _ => quote! {},
+        }
+    };
+    fn impl_getter<I: Iterator<Item = TokenStream>>(
+        ty: &str,
+        metadata: I,
+        fallthrough: TokenStream,
+    ) -> TokenStream {
+        let getter_name = Ident::new(&format!("get_{}", ty), Span::call_site());
+        let ty: Type = syn::parse_str(ty).unwrap();
+        quote! {
+            fn #getter_name(&self, command: &str, key: &str) -> Option<#ty> {
+                #fallthrough
+                match key {
+                    #(#metadata)*
+                    _ => None,
+                }
+            }
+        }
+    }
+    let bool_metadata = options
+        .metadata
+        .iter()
+        .filter(|(_, lit)| matches!(lit, Lit::Bool(_)))
+        .map(|(name, value)| {
+            let name = LitStr::new(&name.to_string(), name.span());
+            quote! {
+                #name => Some(#value),
+            }
+        });
+    let number_metadata = |ty: &str| {
+        let ty: Type = syn::parse_str(ty).unwrap();
+        options
+            .metadata
+            .iter()
+            .filter(|(_, lit)| matches!(lit, Lit::Int(_) | Lit::Float(_) | Lit::Byte(_)))
+            .map(move |(name, value)| {
+                let name = LitStr::new(&name.to_string(), name.span());
+                quote! {
+                    #name => Some(#value as #ty),
+                }
+            })
+    };
+    let char_metadata = options
+        .metadata
+        .iter()
+        .filter(|(_, lit)| matches!(lit, Lit::Char(_)))
+        .map(|(name, value)| {
+            let name = LitStr::new(&name.to_string(), name.span());
+            quote! {
+                #name => Some(#value),
+            }
+        });
+    let str_metadata = options
+        .metadata
+        .iter()
+        .filter(|(_, lit)| matches!(lit, Lit::Str(_)))
+        .map(|(name, value)| {
+            let name = LitStr::new(&name.to_string(), name.span());
+            quote! {
+                #name => Some(#value),
+            }
+        });
+    let bstr_metadata = options
+        .metadata
+        .iter()
+        .filter(|(_, lit)| matches!(lit, Lit::ByteStr(_)))
+        .map(|(name, value)| {
+            let name = LitStr::new(&name.to_string(), name.span());
+            quote! {
+                #name => Some(#value),
+            }
+        });
+
+    let bool_getter = impl_getter("bool", bool_metadata, fallthrough("bool"));
+    let u8_getter = impl_getter("u8", number_metadata("u8"), fallthrough("u8"));
+    let u16_getter = impl_getter("u16", number_metadata("u16"), fallthrough("u16"));
+    let u32_getter = impl_getter("u32", number_metadata("u32"), fallthrough("u32"));
+    let u64_getter = impl_getter("u64", number_metadata("u64"), fallthrough("u64"));
+    let usize_getter = impl_getter("usize", number_metadata("usize"), fallthrough("usize"));
+    let i8_getter = impl_getter("i8", number_metadata("i8"), fallthrough("i8"));
+    let i16_getter = impl_getter("i16", number_metadata("i16"), fallthrough("i16"));
+    let i32_getter = impl_getter("i32", number_metadata("i32"), fallthrough("i32"));
+    let i64_getter = impl_getter("i64", number_metadata("i64"), fallthrough("i64"));
+    let isize_getter = impl_getter("isize", number_metadata("isize"), fallthrough("isize"));
+    let f32_getter = impl_getter("f32", number_metadata("f32"), fallthrough("f32"));
+    let f64_getter = impl_getter("f64", number_metadata("f64"), fallthrough("f64"));
+    let char_getter = impl_getter("char", char_metadata, fallthrough("char"));
+    let str_fallthrough = fallthrough("str");
+    let str_getter = quote! {
+        fn get_str(&self, command: &str, key: &str) -> Option<&'static str> {
+            #str_fallthrough
+            match key {
+                #(#str_metadata)*
+                _ => None,
+            }
+        }
+    };
+    let bstr_fallthrough = fallthrough("bstr");
+    let bstr_getter = quote! {
+        fn get_bstr(&self, command: &str, key: &str) -> Option<&'static [u8]> {
+            #bstr_fallthrough
+            match key {
+                #(#bstr_metadata)*
+                _ => None,
+            }
+        }
+    };
+
+    let res = quote! {
+        #[derive(Clone, Copy, Default)]
+        pub struct Metadata;
+
+        #[allow(overflowing_literals)]
+        impl ::rpc_toolkit::Metadata for Metadata {
+            #bool_getter
+            #u8_getter
+            #u16_getter
+            #u32_getter
+            #u64_getter
+            #usize_getter
+            #i8_getter
+            #i16_getter
+            #i32_getter
+            #i64_getter
+            #isize_getter
+            #f32_getter
+            #f64_getter
+            #char_getter
+            #str_getter
+            #bstr_getter
+        }
+    };
+    // panic!("{}", res);
+    res
+}
+
 fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> TokenStream {
     let about = opt.common().about.clone().into_iter();
     let (subcommand, subcommand_required) = if let Options::Parent(opt) = opt {
@@ -835,6 +1001,7 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
             .map(|a| a.span())
             .unwrap_or_else(Span::call_site),
     );
+    let metadata = metadata(&mut opt);
     let build_app = build_app(command_name_str.clone(), &mut opt, &mut params);
     let rpc_handler = rpc_handler(fn_name, fn_generics, &opt, &params);
     let cli_handler = cli_handler(fn_name, fn_generics, &mut opt, &params);
@@ -846,6 +1013,8 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
 
             pub const NAME: &'static str = #command_name_str;
             pub const ASYNC: bool = #is_async;
+
+            #metadata
 
             #build_app
 

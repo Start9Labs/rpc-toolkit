@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use syn::*;
 
 pub mod build;
@@ -24,6 +26,7 @@ pub struct LeafOptions {
     rename: Option<LitStr>,
     exec_ctx: ExecutionContext,
     display: Option<Path>,
+    metadata: HashMap<Ident, Lit>,
 }
 
 pub struct SelfImplInfo {

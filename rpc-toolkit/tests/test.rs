@@ -7,11 +7,13 @@ use hyper::Request;
 use rpc_toolkit::clap::Arg;
 use rpc_toolkit::hyper::http::Error as HttpError;
 use rpc_toolkit::hyper::{Body, Response};
-use rpc_toolkit::rpc_server_helpers::{DynMiddlewareStage2, DynMiddlewareStage3};
+use rpc_toolkit::rpc_server_helpers::{
+    DynMiddlewareStage2, DynMiddlewareStage3, DynMiddlewareStage4,
+};
 use rpc_toolkit::serde::{Deserialize, Serialize};
 use rpc_toolkit::url::Host;
 use rpc_toolkit::yajrc::RpcError;
-use rpc_toolkit::{command, rpc_server, run_cli, Context};
+use rpc_toolkit::{command, rpc_server, run_cli, Context, Metadata};
 
 #[derive(Debug, Clone)]
 pub struct AppState<T, U> {
@@ -89,21 +91,28 @@ fn dothething2<U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E>, E: Dis
     ))
 }
 
-async fn cors<Params: for<'de> Deserialize<'de> + 'static>(
+async fn cors<Params: for<'de> Deserialize<'de> + 'static, M: Metadata + 'static>(
     req: &mut Request<Body>,
+    _: M,
 ) -> Result<Result<DynMiddlewareStage2<Params>, Response<Body>>, HttpError> {
     if req.method() == hyper::Method::OPTIONS {
         Ok(Err(Response::builder()
             .header("Access-Control-Allow-Origin", "*")
             .body(Body::empty())?))
     } else {
-        Ok(Ok(Box::new(|_req| {
+        Ok(Ok(Box::new(|_| {
             async move {
-                let res: DynMiddlewareStage3 = Box::new(|res| {
+                let res: DynMiddlewareStage3 = Box::new(|_| {
                     async move {
-                        res.headers_mut()
-                            .insert("Access-Control-Allow-Origin", "*".parse()?);
-                        Ok::<_, HttpError>(())
+                        let res: DynMiddlewareStage4 = Box::new(|res| {
+                            async move {
+                                res.headers_mut()
+                                    .insert("Access-Control-Allow-Origin", "*".parse()?);
+                                Ok::<_, HttpError>(())
+                            }
+                            .boxed()
+                        });
+                        Ok::<_, HttpError>(Ok(res))
                     }
                     .boxed()
                 });
