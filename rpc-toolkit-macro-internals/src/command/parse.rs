@@ -666,6 +666,16 @@ pub fn parse_param_attrs(item: &mut ItemFn) -> Result<Vec<ParamType>> {
                             attr.span(),
                             "`arg` and `context` are mutually exclusive",
                         ));
+                    } else if matches!(ty, ParamType::Request) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`arg` and `request` are mutually exclusive",
+                        ));
+                    } else if matches!(ty, ParamType::Response) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`arg` and `response` are mutually exclusive",
+                        ));
                     }
                 } else if param.attrs[i].path.is_ident("context") {
                     let attr = param.attrs.remove(i);
@@ -680,6 +690,66 @@ pub fn parse_param_attrs(item: &mut ItemFn) -> Result<Vec<ParamType>> {
                         return Err(Error::new(
                             attr.span(),
                             "`arg` and `context` are mutually exclusive",
+                        ));
+                    } else if matches!(ty, ParamType::Request) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`context` and `request` are mutually exclusive",
+                        ));
+                    } else if matches!(ty, ParamType::Response) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`context` and `response` are mutually exclusive",
+                        ));
+                    }
+                } else if param.attrs[i].path.is_ident("request") {
+                    let attr = param.attrs.remove(i);
+                    if matches!(ty, ParamType::None) {
+                        ty = ParamType::Request;
+                    } else if matches!(ty, ParamType::Request) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`request` attribute may only be specified once",
+                        ));
+                    } else if matches!(ty, ParamType::Arg(_)) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`arg` and `request` are mutually exclusive",
+                        ));
+                    } else if matches!(ty, ParamType::Context(_)) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`context` and `request` are mutually exclusive",
+                        ));
+                    } else if matches!(ty, ParamType::Response) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`request` and `response` are mutually exclusive",
+                        ));
+                    }
+                } else if param.attrs[i].path.is_ident("response") {
+                    let attr = param.attrs.remove(i);
+                    if matches!(ty, ParamType::None) {
+                        ty = ParamType::Response;
+                    } else if matches!(ty, ParamType::Response) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`response` attribute may only be specified once",
+                        ));
+                    } else if matches!(ty, ParamType::Arg(_)) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`arg` and `response` are mutually exclusive",
+                        ));
+                    } else if matches!(ty, ParamType::Context(_)) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`context` and `response` are mutually exclusive",
+                        ));
+                    } else if matches!(ty, ParamType::Request) {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`request` and `response` are mutually exclusive",
                         ));
                     }
                 } else {

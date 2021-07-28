@@ -54,29 +54,30 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
                                     Err(res) => return Ok(res),
                                 };
                             )*
-                            let rpc_req = ::rpc_toolkit::rpc_server_helpers::make_request(&mut req).await;
+                            let (mut req_parts, req_body) = req.into_parts();
+                            let (mut res_parts, _) = ::rpc_toolkit::hyper::Response::new(()).into_parts();
+                            let rpc_req = ::rpc_toolkit::rpc_server_helpers::make_request(&req_parts, req_body).await;
                             match rpc_req {
                                 Ok(mut rpc_req) => {
                                     #(
-                                        let #middleware_name_post = match #middleware_name_pre2(&mut rpc_req).await? {
+                                        let #middleware_name_post = match #middleware_name_pre2(&mut req_parts, &mut rpc_req).await? {
                                             Ok(a) => a,
                                             Err(res) => return Ok(res),
                                         };
                                     )*
-                                    let mut rpc_res = #command(
-                                        ctx,
-                                        ::rpc_toolkit::yajrc::RpcMethod::as_str(&rpc_req.method),
-                                        rpc_req.params,
-                                    )
-                                    .await;
+                                    let mut rpc_res = match ::rpc_toolkit::serde_json::from_value(::rpc_toolkit::serde_json::Value::Object(rpc_req.params)) {
+                                        Ok(params) => #command(ctx, &req_parts, &mut res_parts, ::rpc_toolkit::yajrc::RpcMethod::as_str(&rpc_req.method), params).await,
+                                        Err(e) => Err(e.into())
+                                    };
                                     #(
-                                        let #middleware_name = match #middleware_name_post_inv(&mut rpc_res).await? {
+                                        let #middleware_name = match #middleware_name_post_inv(&mut res_parts, &mut rpc_res).await? {
                                             Ok(a) => a,
                                             Err(res) => return Ok(res),
                                         };
                                     )*
                                     let mut res = ::rpc_toolkit::rpc_server_helpers::to_response(
-                                        &req,
+                                        &req_parts.headers,
+                                        res_parts,
                                         Ok((
                                             rpc_req.id,
                                             rpc_res,
@@ -89,7 +90,8 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
                                     Ok::<_, ::rpc_toolkit::hyper::http::Error>(res)
                                 }
                                 Err(e) => ::rpc_toolkit::rpc_server_helpers::to_response(
-                                    &req,
+                                    &req_parts.headers,
+                                    res_parts,
                                     Err(e),
                                     status_fn,
                                 ),

@@ -444,7 +444,9 @@ fn rpc_handler(
             quote! { args.#field_name }
         }
         ParamType::Context(_) => quote! { ctx },
-        _ => unreachable!(),
+        ParamType::Request => quote! { request },
+        ParamType::Response => quote! { response },
+        ParamType::None => unreachable!(),
     });
     match opt {
         Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::CliOnly(_)) => quote! {
@@ -452,6 +454,8 @@ fn rpc_handler(
 
             pub async fn rpc_handler#fn_generics(
                 _ctx: #ctx_ty,
+                _request: &::rpc_toolkit::command_helpers::prelude::RequestParts,
+                _response: &mut ::rpc_toolkit::command_helpers::prelude::ResponseParts,
                 method: &str,
                 _args: Params#param_ty_generics,
             ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
@@ -480,6 +484,8 @@ fn rpc_handler(
 
                 pub async fn rpc_handler#fn_generics(
                     ctx: #ctx_ty,
+                    request: &::rpc_toolkit::command_helpers::prelude::RequestParts,
+                    response: &mut ::rpc_toolkit::command_helpers::prelude::ResponseParts,
                     method: &str,
                     args: Params#param_ty_generics,
                 ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
@@ -515,7 +521,7 @@ fn rpc_handler(
                     ),
                 };
                 quote_spanned!{ subcommand.span() =>
-                    [#subcommand::NAME, rest] => #subcommand::#rpc_handler(ctx, rest, ::rpc_toolkit::command_helpers::prelude::from_value(args.rest)?).await
+                    [#subcommand::NAME, rest] => #subcommand::#rpc_handler(ctx, request, response, rest, ::rpc_toolkit::command_helpers::prelude::from_value(args.rest)?).await
                 }
             });
             let subcmd_impl = quote! {
@@ -550,6 +556,8 @@ fn rpc_handler(
 
                         pub async fn rpc_handler#fn_generics(
                             ctx: #ctx_ty,
+                            request: &::rpc_toolkit::command_helpers::prelude::RequestParts,
+                            response: &mut ::rpc_toolkit::command_helpers::prelude::ResponseParts,
                             method: &str,
                             args: Params#param_ty_generics,
                         ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
@@ -569,6 +577,8 @@ fn rpc_handler(
 
                         pub async fn rpc_handler#fn_generics(
                             ctx: #ctx_ty,
+                            request: &::rpc_toolkit::command_helpers::prelude::RequestParts,
+                            response: &mut ::rpc_toolkit::command_helpers::prelude::ResponseParts,
                             method: &str,
                             args: Params#param_ty_generics,
                         ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
@@ -618,7 +628,9 @@ fn cli_handler(
             quote! { params.#field_name.clone() }
         }
         ParamType::Context(_) => quote! { ctx },
-        _ => unreachable!(),
+        ParamType::Request => quote! { request },
+        ParamType::Response => quote! { response },
+        ParamType::None => unreachable!(),
     });
     let mut param_generics_filter = GenericFilter::new(fn_generics);
     for param in params {

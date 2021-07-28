@@ -16,6 +16,8 @@ pub mod prelude {
     pub use std::marker::PhantomData;
 
     pub use clap::{App, AppSettings, Arg, ArgMatches};
+    pub use hyper::http::request::Parts as RequestParts;
+    pub use hyper::http::response::Parts as ResponseParts;
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{from_value, to_value, Value};
     pub use tokio::runtime::Runtime;

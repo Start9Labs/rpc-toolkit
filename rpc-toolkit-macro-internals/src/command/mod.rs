@@ -90,4 +90,6 @@ pub enum ParamType {
     None,
     Arg(ArgOptions),
     Context(Type),
+    Request,
+    Response,
 }

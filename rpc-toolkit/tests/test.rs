@@ -91,18 +91,18 @@ fn dothething2<U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E>, E: Dis
     ))
 }
 
-async fn cors<Params: for<'de> Deserialize<'de> + 'static, M: Metadata + 'static>(
+async fn cors<M: Metadata + 'static>(
     req: &mut Request<Body>,
     _: M,
-) -> Result<Result<DynMiddlewareStage2<Params>, Response<Body>>, HttpError> {
+) -> Result<Result<DynMiddlewareStage2, Response<Body>>, HttpError> {
     if req.method() == hyper::Method::OPTIONS {
         Ok(Err(Response::builder()
             .header("Access-Control-Allow-Origin", "*")
             .body(Body::empty())?))
     } else {
-        Ok(Ok(Box::new(|_| {
+        Ok(Ok(Box::new(|_, _| {
             async move {
-                let res: DynMiddlewareStage3 = Box::new(|_| {
+                let res: DynMiddlewareStage3 = Box::new(|_, _| {
                     async move {
                         let res: DynMiddlewareStage4 = Box::new(|res| {
                             async move {
