@@ -225,7 +225,11 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
                         modifications.extend(quote_spanned! { ty_span =>
                             arg = arg.takes_value(true);
                         });
-                        if p.path.segments.last().unwrap().ident == "Option" {
+                        if let Some(default) = &arg.default {
+                            modifications.extend(quote_spanned! { ty_span =>
+                                arg = arg.default_value(#default);
+                            });
+                        } else if p.path.segments.last().unwrap().ident == "Option" {
                             arg.optional = true;
                             modifications.extend(quote_spanned! { ty_span =>
                                 arg = arg.required(false);

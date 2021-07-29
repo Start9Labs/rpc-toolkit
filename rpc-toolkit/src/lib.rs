@@ -44,6 +44,8 @@ pub use {clap, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
 pub use crate::context::Context;
 pub use crate::metadata::Metadata;
 
+#[cfg(feature = "cli-cookies")]
+pub mod cli_helpers;
 pub mod command_helpers;
 mod context;
 mod metadata;

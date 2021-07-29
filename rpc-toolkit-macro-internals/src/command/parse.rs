@@ -394,6 +394,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
         short: None,
         long: None,
         parse: None,
+        default: None,
         count: None,
         multiple: None,
         stdin: None,
@@ -626,6 +627,28 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                     }
                     NestedMeta::Meta(Meta::Path(p)) if p.is_ident("long") => {
                         return Err(Error::new(p.span(), "`long` must be assigned to"));
+                    }
+                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("default") => {
+                        if let Lit::Str(default) = nv.lit {
+                            if opt.default.is_some() {
+                                return Err(Error::new(
+                                    default.span(),
+                                    "duplicate argument `default`",
+                                ));
+                            }
+                            opt.default = Some(default);
+                        } else {
+                            return Err(Error::new(nv.lit.span(), "`default` must be a string"));
+                        }
+                    }
+                    NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("default") => {
+                        return Err(Error::new(
+                            list.path.span(),
+                            "`default` does not take any arguments",
+                        ));
+                    }
+                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("default") => {
+                        return Err(Error::new(p.span(), "`default` must be assigned to"));
                     }
                     _ => {
                         return Err(Error::new(arg.span(), "unknown argument"));
