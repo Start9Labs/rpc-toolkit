@@ -5,9 +5,6 @@ name = "rpc-toolkit-macro-internals"
 version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[features]
-cli-cookies = []
-
 [dependencies]
 proc-macro2 = "1.0.26"
 quote = "1.0.9"

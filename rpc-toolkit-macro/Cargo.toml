@@ -9,9 +9,6 @@ version = "0.1.0"
 [lib]
 proc-macro = true
 
-[features]
-cli-cookies = ["rpc-toolkit-macro-internals/cli-cookies"]
-
 [dependencies]
 proc-macro2 = "1.0.1"
 rpc-toolkit-macro-internals = { path = "../rpc-toolkit-macro-internals" }
