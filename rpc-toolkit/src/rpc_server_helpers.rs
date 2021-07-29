@@ -111,13 +111,12 @@ pub fn to_response<F: Fn(i32) -> StatusCode>(
 
 // &mut Request<Body> -> Result<Result<Future<&mut RpcRequest<...> -> Future<Result<Result<&mut Response<Body> -> Future<Result<(), HttpError>>, Response<Body>>, HttpError>>>, Response<Body>>, HttpError>
 pub type DynMiddleware<Metadata> = Box<
-    dyn for<'a> FnOnce(
+    dyn for<'a> Fn(
             &'a mut Request<Body>,
             Metadata,
-        ) -> BoxFuture<
-            'a,
-            Result<Result<DynMiddlewareStage2, Response<Body>>, HttpError>,
-        > + Send
+        )
+            -> BoxFuture<'a, Result<Result<DynMiddlewareStage2, Response<Body>>, HttpError>>
+        + Send
         + Sync,
 >;
 pub fn noop<M: Metadata>() -> DynMiddleware<M> {
