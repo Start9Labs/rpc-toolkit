@@ -8,7 +8,8 @@ use rpc_toolkit::clap::Arg;
 use rpc_toolkit::hyper::http::Error as HttpError;
 use rpc_toolkit::hyper::{Body, Response};
 use rpc_toolkit::rpc_server_helpers::{
-    DynMiddlewareStage2, DynMiddlewareStage3, DynMiddlewareStage4,
+    constrain_middleware, DynMiddleware, DynMiddlewareStage2, DynMiddlewareStage3,
+    DynMiddlewareStage4,
 };
 use rpc_toolkit::serde::{Deserialize, Serialize};
 use rpc_toolkit::url::Host;
@@ -214,4 +215,9 @@ fn cli_example() {
             port: matches.value_of("port").unwrap_or("8000").parse().unwrap(),
         }), data: () }
     )
+}
+
+fn type_check() {
+    let middleware: DynMiddleware<dothething::Metadata> = todo!();
+    constrain_middleware(&middleware);
 }

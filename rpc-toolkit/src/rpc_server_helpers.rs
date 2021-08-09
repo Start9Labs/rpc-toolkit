@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -163,7 +164,7 @@ pub fn constrain_middleware<
     'c,
     'd,
     M: Metadata,
-    ReqFn: Fn(&'a mut Request<Body>, M) -> ReqFut,
+    ReqFn: Fn(&'a mut Request<Body>, M) -> ReqFut + Clone,
     ReqFut: Future<Output = Result<Result<RpcReqFn, Response<Body>>, HttpError>> + 'a,
     RpcReqFn: FnOnce(
         &'b mut RequestParts,

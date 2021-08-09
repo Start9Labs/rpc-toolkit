@@ -19,6 +19,14 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
     let status_fn = args.status_fn.unwrap_or_else(|| {
         syn::parse2(quote! { |_| ::rpc_toolkit::hyper::StatusCode::OK }).unwrap()
     });
+    let middleware_name_clone = (0..)
+        .map(|i| Ident::new(&format!("middleware_clone_{}", i), Span::call_site()))
+        .take(args.middleware.len());
+    let middleware_name_clone2 = middleware_name_clone.clone();
+    let middleware_name_clone3 = middleware_name_clone.clone();
+    let middleware_name_clone4 = middleware_name_clone.clone();
+    let middleware_name_clone5 = middleware_name_clone.clone();
+    let middleware_name_clone6 = middleware_name_clone.clone();
     let middleware_name_pre = (0..)
         .map(|i| Ident::new(&format!("middleware_pre_{}", i), Span::call_site()))
         .take(args.middleware.len());
@@ -41,15 +49,24 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
             let ctx = #ctx;
             let status_fn = #status_fn;
             let builder = ::rpc_toolkit::rpc_server_helpers::make_builder(&ctx);
+            #(
+                let #middleware_name_clone = ::std::sync::Arc::new(#middleware);
+            )*
             let make_svc = ::rpc_toolkit::hyper::service::make_service_fn(move |_| {
                 let ctx = ctx.clone();
+                #(
+                    let #middleware_name_clone3 = #middleware_name_clone2.clone();
+                )*
                 async move {
                     Ok::<_, ::rpc_toolkit::hyper::Error>(::rpc_toolkit::hyper::service::service_fn(move |mut req| {
                         let ctx = ctx.clone();
                         let metadata = #command_module::Metadata::default();
+                        #(
+                            let #middleware_name_clone5 = #middleware_name_clone4.clone();
+                        )*
                         async move {
                             #(
-                                let #middleware_name_pre = match ::rpc_toolkit::rpc_server_helpers::constrain_middleware(#middleware)(&mut req, metadata).await? {
+                                let #middleware_name_pre = match ::rpc_toolkit::rpc_server_helpers::constrain_middleware(&*#middleware_name_clone6)(&mut req, metadata).await? {
                                     Ok(a) => a,
                                     Err(res) => return Ok(res),
                                 };
