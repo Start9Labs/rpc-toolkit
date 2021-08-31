@@ -493,7 +493,14 @@ fn rpc_handler(
                     method: &str,
                     args: Params#param_ty_generics,
                 ) -> Result<::rpc_toolkit::command_helpers::prelude::Value, ::rpc_toolkit::command_helpers::prelude::RpcError> {
-                    Ok(::rpc_toolkit::command_helpers::prelude::to_value(#invocation)?)
+                    if method.is_empty() {
+                        Ok(::rpc_toolkit::command_helpers::prelude::to_value(#invocation)?)
+                    } else {
+                        Err(::rpc_toolkit::command_helpers::prelude::RpcError {
+                            data: Some(method.into()),
+                            ..::rpc_toolkit::command_helpers::prelude::yajrc::METHOD_NOT_FOUND_ERROR
+                        })
+                    }
                 }
             }
         }
@@ -818,44 +825,91 @@ fn cli_handler(
             }
         }
         Options::Leaf(opt) => {
-            let invocation = if opt.is_async {
+            if let ExecutionContext::CustomCli {
+                ref cli, is_async, ..
+            } = opt.exec_ctx
+            {
+                let fn_path = cli;
+                let invocation = if is_async {
+                    quote! {
+                        rt_ref.block_on(#fn_path(#(#param),*))?
+                    }
+                } else {
+                    quote! {
+                        #fn_path(#(#param),*)?
+                    }
+                };
+                let display_res = if let Some(display_fn) = &opt.display {
+                    quote! {
+                        #display_fn(#invocation, matches)
+                    }
+                } else {
+                    quote! {
+                        ::rpc_toolkit::command_helpers::prelude::default_display(#invocation, matches)
+                    }
+                };
+                let rt_action = if is_async {
+                    create_rt
+                } else {
+                    quote! {
+                        drop(rt);
+                    }
+                };
                 quote! {
-                    rt_ref.block_on(#fn_path(#(#param),*))?
-                }
-            } else {
-                quote! {
-                    #fn_path(#(#param),*)?
-                }
-            };
-            let display_res = if let Some(display_fn) = &opt.display {
-                quote! {
-                    #display_fn(#invocation, matches)
-                }
-            } else {
-                quote! {
-                    ::rpc_toolkit::command_helpers::prelude::default_display(#invocation, matches)
-                }
-            };
-            let rt_action = if opt.is_async {
-                create_rt
-            } else {
-                quote! {
-                    drop(rt);
-                }
-            };
-            quote! {
-                pub fn cli_handler#generics(
-                    ctx: #ctx_ty,
-                    mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
-                    matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
-                    _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
-                    parent_params: ParentParams
-                ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
-                    #param_struct_def
+                    pub fn cli_handler#generics(
+                        ctx: #ctx_ty,
+                        mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
+                        matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                        _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
+                        parent_params: ParentParams
+                    ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
+                        #param_struct_def
 
-                    #rt_action
+                        #rt_action
 
-                    Ok(#display_res)
+                        Ok(#display_res)
+                    }
+                }
+            } else {
+                let invocation = if opt.is_async {
+                    quote! {
+                        rt_ref.block_on(#fn_path(#(#param),*))?
+                    }
+                } else {
+                    quote! {
+                        #fn_path(#(#param),*)?
+                    }
+                };
+                let display_res = if let Some(display_fn) = &opt.display {
+                    quote! {
+                        #display_fn(#invocation, matches)
+                    }
+                } else {
+                    quote! {
+                        ::rpc_toolkit::command_helpers::prelude::default_display(#invocation, matches)
+                    }
+                };
+                let rt_action = if opt.is_async {
+                    create_rt
+                } else {
+                    quote! {
+                        drop(rt);
+                    }
+                };
+                quote! {
+                    pub fn cli_handler#generics(
+                        ctx: #ctx_ty,
+                        mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
+                        matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                        _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
+                        parent_params: ParentParams
+                    ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
+                        #param_struct_def
+
+                        #rt_action
+
+                        Ok(#display_res)
+                    }
                 }
             }
         }

@@ -126,6 +126,73 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                     "`display` cannot be assigned to",
                 ));
             }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("custom_cli") => {
+                if list.nested.len() == 1 {
+                    match &opt.common().exec_ctx {
+                        ExecutionContext::Standard => match &list.nested[0] {
+                            NestedMeta::Meta(Meta::Path(custom_cli_impl)) => {
+                                opt.common().exec_ctx = ExecutionContext::CustomCli {
+                                    custom: list.path,
+                                    cli: custom_cli_impl.clone(),
+                                    is_async: false,
+                                }
+                            }
+                            NestedMeta::Meta(Meta::List(custom_cli_impl)) if custom_cli_impl.nested.len() == 1 => {
+                                let is_async = match custom_cli_impl.nested.first().unwrap() {
+                                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("async") => false,
+                                    arg => return Err(Error::new(arg.span(), "unknown argument")),
+                                };
+                                opt.common().exec_ctx = ExecutionContext::CustomCli {
+                                    custom: list.path,
+                                    cli: custom_cli_impl.path.clone(),
+                                    is_async,
+                                };
+                            }
+                            a => {
+                                return Err(Error::new(
+                                    a.span(),
+                                    "`custom_cli` implementation must be a path, or a list with 1 argument",
+                                ))
+                            }
+                        },
+                        ExecutionContext::CliOnly(_) => {
+                            return Err(Error::new(list.span(), "duplicate argument: `cli_only`"))
+                        }
+                        ExecutionContext::RpcOnly(_) => {
+                            return Err(Error::new(
+                                list.span(),
+                                "`cli_only` and `rpc_only` are mutually exclusive",
+                            ))
+                        }
+                        ExecutionContext::Local(_) => {
+                            return Err(Error::new(
+                                list.span(),
+                                "`cli_only` and `local` are mutually exclusive",
+                            ))
+                        }
+                        ExecutionContext::CustomCli { .. } => {
+                            return Err(Error::new(
+                                list.span(),
+                                "`cli_only` and `custom_cli` are mutually exclusive",
+                            ))
+                        }
+                    }
+                } else {
+                    return Err(Error::new(
+                        list.nested.span(),
+                        "`custom_cli` can only have one implementation",
+                    ));
+                }
+            }
+            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("custom_cli") => {
+                return Err(Error::new(p.span(), "`custom_cli` requires an argument"));
+            }
+            NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("custom_cli") => {
+                return Err(Error::new(
+                    nv.path.span(),
+                    "`custom_cli` cannot be assigned to",
+                ));
+            }
             NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("aliases") => {
                 if !opt.common().aliases.is_empty() {
                     return Err(Error::new(list.span(), "duplicate argument `alias`"));
@@ -170,6 +237,12 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                             "`cli_only` and `local` are mutually exclusive",
                         ))
                     }
+                    ExecutionContext::CustomCli { .. } => {
+                        return Err(Error::new(
+                            p.span(),
+                            "`cli_only` and `custom_cli` are mutually exclusive",
+                        ))
+                    }
                 }
             }
             NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("cli_only") => {
@@ -204,6 +277,12 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                             "`rpc_only` and `local` are mutually exclusive",
                         ))
                     }
+                    ExecutionContext::CustomCli { .. } => {
+                        return Err(Error::new(
+                            p.span(),
+                            "`rpc_only` and `custom_cli` are mutually exclusive",
+                        ))
+                    }
                 }
             }
             NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("rpc_only") => {
@@ -236,6 +315,12 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                         return Err(Error::new(
                             p.span(),
                             "`local` and `cli_only` are mutually exclusive",
+                        ))
+                    }
+                    ExecutionContext::CustomCli { .. } => {
+                        return Err(Error::new(
+                            p.span(),
+                            "`local` and `custom_cli` are mutually exclusive",
                         ))
                     }
                 }

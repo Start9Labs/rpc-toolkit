@@ -10,6 +10,11 @@ pub enum ExecutionContext {
     CliOnly(Path),
     RpcOnly(Path),
     Local(Path),
+    CustomCli {
+        custom: Path,
+        cli: Path,
+        is_async: bool,
+    },
 }
 impl Default for ExecutionContext {
     fn default() -> Self {
