@@ -6,6 +6,9 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
     let mut opt = Options::Leaf(Default::default());
     for arg in args {
         match arg {
+            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("macro_debug") => {
+                opt.common().macro_debug = true;
+            }
             NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("subcommands") => {
                 let inner = opt.to_parent()?;
                 if !inner.subcommands.is_empty() {
@@ -31,32 +34,83 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                                         }
                                         inner.self_impl = Some(SelfImplInfo {
                                             path: self_impl,
+                                            context: parse2(quote::quote! { () }).unwrap(),
                                             is_async: false,
                                             blocking: false,
                                         })
                                     }
-                                    NestedMeta::Meta(Meta::List(l)) if l.nested.len() == 1 => {
+                                    NestedMeta::Meta(Meta::List(l)) => {
                                         if inner.self_impl.is_some() {
                                             return Err(Error::new(
                                                 self_impl.span(),
                                                 "duplicate argument `self`",
                                             ));
                                         }
-                                        let blocking = match l.nested.first().unwrap() {
-                                            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("blocking") => true,
-                                            NestedMeta::Meta(Meta::Path(p)) if p.is_ident("async") => false,
-                                            arg => return Err(Error::new(arg.span(), "unknown argument")),
-                                        };
+                                        let mut is_async = false;
+                                        let mut blocking = false;
+                                        let mut context: Type =
+                                            parse2(quote::quote! { () }).unwrap();
+                                        for meta in &l.nested {
+                                            match meta {
+                                                NestedMeta::Meta(Meta::Path(p))
+                                                    if p.is_ident("async") =>
+                                                {
+                                                    is_async = true;
+                                                    if blocking {
+                                                        return Err(Error::new(
+                                                            p.span(),
+                                                            "`async` and `blocking` are mutually exclusive",
+                                                        ));
+                                                    }
+                                                }
+                                                NestedMeta::Meta(Meta::Path(p))
+                                                    if p.is_ident("blocking") =>
+                                                {
+                                                    blocking = true;
+                                                    if is_async {
+                                                        return Err(Error::new(
+                                                            p.span(),
+                                                            "`async` and `blocking` are mutually exclusive",
+                                                        ));
+                                                    }
+                                                }
+                                                NestedMeta::Meta(Meta::List(p))
+                                                    if p.path.is_ident("context") =>
+                                                {
+                                                    context = if let Some(NestedMeta::Meta(
+                                                        Meta::Path(context),
+                                                    )) = p.nested.first()
+                                                    {
+                                                        Type::Path(TypePath {
+                                                            path: context.clone(),
+                                                            qself: None,
+                                                        })
+                                                    } else {
+                                                        return Err(Error::new(
+                                                            p.span(),
+                                                            "`context` requires a path argument",
+                                                        ));
+                                                    }
+                                                }
+                                                arg => {
+                                                    return Err(Error::new(
+                                                        arg.span(),
+                                                        "unknown argument",
+                                                    ))
+                                                }
+                                            }
+                                        }
                                         inner.self_impl = Some(SelfImplInfo {
                                             path: l.path,
-                                            is_async: !blocking,
+                                            context,
+                                            is_async,
                                             blocking,
                                         })
                                     }
                                     a => {
                                         return Err(Error::new(
                                             a.span(),
-                                            "`self` implementation must be a path, or a list with 1 argument",
+                                            "`self` implementation must be a path, or a list",
                                         ))
                                     }
                                 }
@@ -133,17 +187,33 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
                             NestedMeta::Meta(Meta::Path(custom_cli_impl)) => {
                                 opt.common().exec_ctx = ExecutionContext::CustomCli {
                                     custom: list.path,
+                                    context: parse2(quote::quote!{ () }).unwrap(),
                                     cli: custom_cli_impl.clone(),
                                     is_async: false,
                                 }
                             }
-                            NestedMeta::Meta(Meta::List(custom_cli_impl)) if custom_cli_impl.nested.len() == 1 => {
-                                let is_async = match custom_cli_impl.nested.first().unwrap() {
-                                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("async") => false,
-                                    arg => return Err(Error::new(arg.span(), "unknown argument")),
-                                };
+                            NestedMeta::Meta(Meta::List(custom_cli_impl)) => {
+                                let mut is_async = false;
+                                let mut context: Type = parse2(quote::quote! { () }).unwrap();
+                                for meta in &custom_cli_impl.nested {
+                                    match meta {
+                                        NestedMeta::Meta(Meta::Path(p)) if p.is_ident("async") => is_async = true,
+                                        NestedMeta::Meta(Meta::List(p)) if p.path.is_ident("context") => {
+                                            context = if let Some(NestedMeta::Meta(Meta::Path(context))) = p.nested.first() {
+                                                Type::Path(TypePath {
+                                                    path: context.clone(),
+                                                    qself: None,
+                                                })
+                                            } else {
+                                                return Err(Error::new(p.span(), "`context` requires a path argument"));
+                                            }
+                                        }
+                                        arg => return Err(Error::new(arg.span(), "unknown argument")),
+                                    }
+                                }
                                 opt.common().exec_ctx = ExecutionContext::CustomCli {
                                     custom: list.path,
+                                    context,
                                     cli: custom_cli_impl.path.clone(),
                                     is_async,
                                 };

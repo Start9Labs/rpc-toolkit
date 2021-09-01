@@ -195,16 +195,16 @@ fn cli_test() {
 #[test]
 #[ignore]
 fn cli_example() {
-    run_cli!(
-        dothething::<String, _>,
-        app => app
+    run_cli! ({
+        command: dothething::<String, _>,
+        app: app => app
             .arg(Arg::with_name("host").long("host").short("h").takes_value(true))
             .arg(Arg::with_name("port").long("port").short("p").takes_value(true)),
-        matches => AppState(Arc::new(ConfigSeed {
+        context: matches => AppState(Arc::new(ConfigSeed {
             host: Host::parse(matches.value_of("host").unwrap_or("localhost")).unwrap(),
             port: matches.value_of("port").unwrap_or("8000").parse().unwrap(),
         }))
-    )
+    })
 }
 
 ////////////////////////////////////////////////

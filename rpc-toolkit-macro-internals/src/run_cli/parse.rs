@@ -25,41 +25,40 @@ impl Parse for MutApp {
 
 impl Parse for RunCliArgs {
     fn parse(input: ParseStream) -> Result<Self> {
-        let command = input.parse()?;
-        if !input.is_empty() {
-            let _: token::Comma = input.parse()?;
+        let args;
+        braced!(args in input);
+        let mut command = None;
+        let mut mut_app = None;
+        let mut make_ctx = None;
+        let mut parent_data = None;
+        let mut exit_fn = None;
+        while !args.is_empty() {
+            let arg_name: syn::Ident = args.parse()?;
+            let _: token::Colon = args.parse()?;
+            match arg_name.to_string().as_str() {
+                "command" => {
+                    command = Some(args.parse()?);
+                }
+                "app" => {
+                    mut_app = Some(args.parse()?);
+                }
+                "context" => {
+                    make_ctx = Some(args.parse()?);
+                }
+                "parent_data" => {
+                    parent_data = Some(args.parse()?);
+                }
+                "exit" => {
+                    exit_fn = Some(args.parse()?);
+                }
+                _ => return Err(Error::new(arg_name.span(), "unknown argument")),
+            }
+            if !args.is_empty() {
+                let _: token::Comma = args.parse()?;
+            }
         }
-        let mut_app = if !input.is_empty() {
-            Some(input.parse()?)
-        } else {
-            None
-        };
-        if !input.is_empty() {
-            let _: token::Comma = input.parse()?;
-        }
-        let make_ctx = if !input.is_empty() {
-            Some(input.parse()?)
-        } else {
-            None
-        };
-        if !input.is_empty() {
-            let _: token::Comma = input.parse()?;
-        }
-        if !input.is_empty() {
-            let _: token::Comma = input.parse()?;
-        }
-        let parent_data = if !input.is_empty() {
-            Some(input.parse()?)
-        } else {
-            None
-        };
-        let exit_fn = if !input.is_empty() {
-            Some(input.parse()?)
-        } else {
-            None
-        };
         Ok(RunCliArgs {
-            command,
+            command: command.expect("`command` is required"),
             mut_app,
             make_ctx,
             parent_data,

@@ -13,6 +13,7 @@ pub enum ExecutionContext {
     CustomCli {
         custom: Path,
         cli: Path,
+        context: Type,
         is_async: bool,
     },
 }
@@ -24,6 +25,7 @@ impl Default for ExecutionContext {
 
 #[derive(Default)]
 pub struct LeafOptions {
+    macro_debug: bool,
     blocking: Option<Path>,
     is_async: bool,
     aliases: Vec<LitStr>,
@@ -36,6 +38,7 @@ pub struct LeafOptions {
 
 pub struct SelfImplInfo {
     path: Path,
+    context: Type,
     is_async: bool,
     blocking: bool,
 }

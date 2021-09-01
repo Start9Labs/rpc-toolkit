@@ -10,22 +10,72 @@ use syn::token::{Add, Comma, Where};
 use super::parse::*;
 use super::*;
 
-fn ctx_trait(ctx_ty: Type, opt: &Options) -> TokenStream {
+fn ctx_trait(ctx_ty: Option<Type>, opt: &mut Options) -> TokenStream {
     let mut bounds: Punctuated<TypeParamBound, Add> = Punctuated::new();
-    bounds.push(macro_try!(parse2(quote! { Into<#ctx_ty> })));
     bounds.push(macro_try!(parse2(quote! { ::rpc_toolkit::Context })));
-    if let Options::Parent(ParentOptions { subcommands, .. }) = opt {
-        bounds.push(macro_try!(parse2(quote! { Clone })));
+    let mut rpc_bounds = bounds.clone();
+    let mut cli_bounds = bounds;
+
+    let (use_cli, use_rpc) = match &opt.common().exec_ctx {
+        ExecutionContext::CliOnly(_) => (Some(None), false),
+        ExecutionContext::RpcOnly(_) | ExecutionContext::Standard => (None, true),
+        ExecutionContext::Local(_) => (Some(None), true),
+        ExecutionContext::CustomCli { context, .. } => (Some(Some(context.clone())), true),
+    };
+
+    if let Options::Parent(ParentOptions {
+        subcommands,
+        self_impl,
+        ..
+    }) = opt
+    {
+        if let Some(ctx_ty) = ctx_ty {
+            cli_bounds.push(macro_try!(parse2(quote! { Into<#ctx_ty> })));
+            cli_bounds.push(macro_try!(parse2(quote! { Clone })));
+            rpc_bounds.push(macro_try!(parse2(quote! { Into<#ctx_ty> })));
+            rpc_bounds.push(macro_try!(parse2(quote! { Clone })));
+        }
+        if let Some(SelfImplInfo { context, .. }) = self_impl {
+            if let Some(cli_ty) = use_cli.as_ref() {
+                if let Some(cli_ty) = cli_ty {
+                    cli_bounds.push(macro_try!(parse2(quote! { Into<#cli_ty> })));
+                } else {
+                    cli_bounds.push(macro_try!(parse2(quote! { Into<#context> })));
+                }
+            }
+            if use_rpc {
+                rpc_bounds.push(macro_try!(parse2(quote! { Into<#context> })));
+            }
+        }
         for subcmd in subcommands {
             let mut path = subcmd.clone();
             std::mem::take(&mut path.segments.last_mut().unwrap().arguments);
-            bounds.push(macro_try!(parse2(quote! { #path::CommandContext })));
+            cli_bounds.push(macro_try!(parse2(quote! { #path::CommandContextCli })));
+            rpc_bounds.push(macro_try!(parse2(quote! { #path::CommandContextRpc })));
+        }
+    } else {
+        if let Some(cli_ty) = use_cli.as_ref() {
+            if let Some(cli_ty) = cli_ty {
+                cli_bounds.push(macro_try!(parse2(quote! { Into<#cli_ty> })));
+            } else if let Some(ctx_ty) = &ctx_ty {
+                cli_bounds.push(macro_try!(parse2(quote! { Into<#ctx_ty> })));
+            }
+        }
+        if use_rpc {
+            if let Some(ctx_ty) = &ctx_ty {
+                rpc_bounds.push(macro_try!(parse2(quote! { Into<#ctx_ty> })));
+            }
         }
     }
-    quote! {
-        pub trait CommandContext: #bounds {}
-        impl<T> CommandContext for T where T: #bounds {}
-    }
+
+    let res = quote! {
+        pub trait CommandContextCli: #cli_bounds {}
+        impl<T> CommandContextCli for T where T: #cli_bounds {}
+
+        pub trait CommandContextRpc: #rpc_bounds {}
+        impl<T> CommandContextRpc for T where T: #rpc_bounds {}
+    };
+    res
 }
 
 fn metadata(full_options: &Options) -> TokenStream {
@@ -416,7 +466,7 @@ fn rpc_handler(
     let mut parent_data_ty = quote! { () };
     let mut generics = fn_generics.clone();
     generics.params.push(macro_try!(syn::parse2(
-        quote! { GenericContext: CommandContext }
+        quote! { GenericContext: CommandContextRpc }
     )));
     if generics.lt_token.is_none() {
         generics.lt_token = Some(Default::default());
@@ -669,7 +719,7 @@ fn cli_handler(
         quote! { ParentParams: ::rpc_toolkit::command_helpers::prelude::Serialize }
     )));
     generics.params.push(macro_try!(syn::parse2(
-        quote! { GenericContext: CommandContext }
+        quote! { GenericContext: CommandContextCli }
     )));
     if generics.lt_token.is_none() {
         generics.lt_token = Some(Default::default());
@@ -1073,11 +1123,11 @@ fn cli_handler(
                     let self_impl_fn = &self_impl.path;
                     let self_impl = if self_impl.is_async {
                         quote! {
-                            rt_ref.block_on(#self_impl_fn(Into::into(ctx), parent_data))
+                            rt_ref.block_on(#self_impl_fn(unreachable!(), parent_data))
                         }
                     } else {
                         quote! {
-                            #self_impl_fn(Into::into(ctx), parent_data)
+                            #self_impl_fn(unreachable!(), parent_data)
                         }
                     };
                     let create_rt = if common.is_async {
@@ -1093,9 +1143,6 @@ fn cli_handler(
                             let return_ty = if true {
                                 ::rpc_toolkit::command_helpers::prelude::PhantomData
                             } else {
-                                let ctx_new = unreachable!();
-                                ::rpc_toolkit::command_helpers::prelude::match_types(&ctx, &ctx_new);
-                                let ctx = ctx_new;
                                 ::rpc_toolkit::command_helpers::prelude::make_phantom(#self_impl?)
                             };
 
@@ -1160,17 +1207,14 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
             .map(|a| a.span())
             .unwrap_or_else(Span::call_site),
     );
-    let ctx_ty = params
-        .iter()
-        .find_map(|a| {
-            if let ParamType::Context(ty) = a {
-                Some(ty.clone())
-            } else {
-                None
-            }
-        })
-        .unwrap_or(macro_try!(syn::parse2(quote! { () })));
-    let ctx_trait = ctx_trait(ctx_ty, &opt);
+    let ctx_ty = params.iter().find_map(|a| {
+        if let ParamType::Context(ty) = a {
+            Some(ty.clone())
+        } else {
+            None
+        }
+    });
+    let ctx_trait = ctx_trait(ctx_ty, &mut opt);
     let metadata = metadata(&mut opt);
     let build_app = build_app(command_name_str.clone(), &mut opt, &mut params);
     let rpc_handler = rpc_handler(fn_name, fn_generics, &opt, &params);
@@ -1195,6 +1239,8 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
             #cli_handler
         }
     };
-    // panic!("{}", res);
+    if opt.common().macro_debug {
+        panic!("EXPANDED MACRO:\n{}", res);
+    }
     res
 }
