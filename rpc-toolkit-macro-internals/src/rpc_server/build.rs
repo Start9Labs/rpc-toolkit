@@ -6,16 +6,24 @@ use super::*;
 
 pub fn build(args: RpcServerArgs) -> TokenStream {
     let mut command = args.command;
-    let arguments = std::mem::replace(
+    let mut arguments = std::mem::replace(
         &mut command.segments.last_mut().unwrap().arguments,
         PathArguments::None,
     );
     let command_module = command.clone();
+    if let PathArguments::AngleBracketed(a) = &mut arguments {
+        a.args.push(syn::parse2(quote! { _ }).unwrap());
+    }
     command.segments.push(PathSegment {
         ident: Ident::new("rpc_handler", command.span()),
         arguments,
     });
     let ctx = args.ctx;
+    let parent_data = if let Some(data) = args.parent_data {
+        quote! { #data }
+    } else {
+        quote! { () }
+    };
     let status_fn = args.status_fn.unwrap_or_else(|| {
         syn::parse2(quote! { |_| ::rpc_toolkit::hyper::StatusCode::OK }).unwrap()
     });
@@ -47,6 +55,7 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
     let res = quote! {
         {
             let ctx = #ctx;
+            let parent_data = #parent_data;
             let status_fn = #status_fn;
             let builder = ::rpc_toolkit::rpc_server_helpers::make_builder(&ctx);
             #(
@@ -54,12 +63,14 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
             )*
             let make_svc = ::rpc_toolkit::hyper::service::make_service_fn(move |_| {
                 let ctx = ctx.clone();
+                let parent_data = parent_data.clone();
                 #(
                     let #middleware_name_clone3 = #middleware_name_clone2.clone();
                 )*
                 async move {
                     Ok::<_, ::rpc_toolkit::hyper::Error>(::rpc_toolkit::hyper::service::service_fn(move |mut req| {
                         let ctx = ctx.clone();
+                        let parent_data = parent_data.clone();
                         let metadata = #command_module::Metadata::default();
                         #(
                             let #middleware_name_clone5 = #middleware_name_clone4.clone();
@@ -83,7 +94,7 @@ pub fn build(args: RpcServerArgs) -> TokenStream {
                                         };
                                     )*
                                     let mut rpc_res = match ::rpc_toolkit::serde_json::from_value(::rpc_toolkit::serde_json::Value::Object(rpc_req.params)) {
-                                        Ok(params) => #command(ctx, &req_parts, &mut res_parts, ::rpc_toolkit::yajrc::RpcMethod::as_str(&rpc_req.method), params).await,
+                                        Ok(params) => #command(ctx, parent_data, &req_parts, &mut res_parts, ::rpc_toolkit::yajrc::RpcMethod::as_str(&rpc_req.method), params).await,
                                         Err(e) => Err(e.into())
                                     };
                                     #(

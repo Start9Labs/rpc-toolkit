@@ -33,3 +33,9 @@ pub trait Context {
 }
 
 impl Context for () {}
+
+impl<'a, T: Context + 'a> From<T> for Box<dyn Context + 'a> {
+    fn from(ctx: T) -> Self {
+        Box::new(ctx)
+    }
+}

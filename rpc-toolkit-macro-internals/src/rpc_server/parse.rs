@@ -9,6 +9,7 @@ impl Parse for RpcServerArgs {
         braced!(args in input);
         let mut command = None;
         let mut ctx = None;
+        let mut parent_data = None;
         let mut status_fn = None;
         let mut middleware = Punctuated::new();
         while !args.is_empty() {
@@ -20,6 +21,9 @@ impl Parse for RpcServerArgs {
                 }
                 "context" => {
                     ctx = Some(args.parse()?);
+                }
+                "parent_data" => {
+                    parent_data = Some(args.parse()?);
                 }
                 "status" => {
                     status_fn = Some(args.parse()?);
@@ -38,6 +42,7 @@ impl Parse for RpcServerArgs {
         Ok(RpcServerArgs {
             command: command.expect("`command` is required"),
             ctx: ctx.expect("`context` is required"),
+            parent_data,
             status_fn,
             middleware,
         })

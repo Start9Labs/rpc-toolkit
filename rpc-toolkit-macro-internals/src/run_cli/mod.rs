@@ -14,6 +14,7 @@ pub struct RunCliArgs {
     command: Path,
     mut_app: Option<MutApp>,
     make_ctx: Option<MakeCtx>,
+    parent_data: Option<Expr>,
     exit_fn: Option<Expr>,
 }
 

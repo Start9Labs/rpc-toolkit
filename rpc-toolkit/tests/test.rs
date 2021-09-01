@@ -8,8 +8,7 @@ use rpc_toolkit::clap::Arg;
 use rpc_toolkit::hyper::http::Error as HttpError;
 use rpc_toolkit::hyper::{Body, Response};
 use rpc_toolkit::rpc_server_helpers::{
-    constrain_middleware, DynMiddleware, DynMiddlewareStage2, DynMiddlewareStage3,
-    DynMiddlewareStage4,
+    DynMiddlewareStage2, DynMiddlewareStage3, DynMiddlewareStage4,
 };
 use rpc_toolkit::serde::{Deserialize, Serialize};
 use rpc_toolkit::url::Host;
@@ -17,34 +16,29 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{command, rpc_server, run_cli, Context, Metadata};
 
 #[derive(Debug, Clone)]
-pub struct AppState<T, U> {
-    seed: T,
-    data: U,
-}
-impl<T, U> AppState<T, U> {
-    pub fn map<F: FnOnce(U) -> V, V>(self, f: F) -> AppState<T, V> {
-        AppState {
-            seed: self.seed,
-            data: f(self.data),
-        }
+pub struct AppState(Arc<ConfigSeed>);
+impl From<AppState> for () {
+    fn from(_: AppState) -> Self {
+        ()
     }
 }
 
+#[derive(Debug)]
 pub struct ConfigSeed {
     host: Host,
     port: u16,
 }
 
-impl<T> Context for AppState<Arc<ConfigSeed>, T> {
+impl Context for AppState {
     fn host(&self) -> Host<&str> {
-        match &self.seed.host {
+        match &self.0.host {
             Host::Domain(s) => Host::Domain(s.as_str()),
             Host::Ipv4(i) => Host::Ipv4(*i),
             Host::Ipv6(i) => Host::Ipv6(*i),
         }
     }
     fn port(&self) -> u16 {
-        self.seed.port
+        self.0.port
     }
 }
 
@@ -53,41 +47,43 @@ impl<T> Context for AppState<Arc<ConfigSeed>, T> {
     subcommands("dothething2::<U, E>", self(dothething_impl(async)))
 )]
 async fn dothething<
-    U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E> + Clone,
+    U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E> + Clone + 'static,
     E: Display,
 >(
-    #[context] ctx: AppState<Arc<ConfigSeed>, ()>,
+    #[context] _ctx: AppState,
     #[arg(short = "a")] arg1: Option<String>,
     #[arg(short = "b")] val: String,
     #[arg(short = "c", help = "I am the flag `c`!")] arg3: bool,
     #[arg(stdin)] structured: U,
-) -> Result<AppState<Arc<ConfigSeed>, (Option<String>, String, bool, U)>, RpcError> {
-    Ok(ctx.map(|_| (arg1, val, arg3, structured)))
+) -> Result<(Option<String>, String, bool, U), RpcError> {
+    Ok((arg1, val, arg3, structured))
 }
 
 async fn dothething_impl<U: Serialize>(
-    ctx: AppState<Arc<ConfigSeed>, (Option<String>, String, bool, U)>,
+    ctx: AppState,
+    parent_data: (Option<String>, String, bool, U),
 ) -> Result<String, RpcError> {
     Ok(format!(
-        "{:?}, {}, {}, {}",
-        ctx.data.0,
-        ctx.data.1,
-        ctx.data.2,
-        serde_json::to_string_pretty(&ctx.data.3)?
+        "{:?}, {:?}, {}, {}, {}",
+        ctx,
+        parent_data.0,
+        parent_data.1,
+        parent_data.2,
+        serde_json::to_string_pretty(&parent_data.3)?
     ))
 }
 
 #[command(about = "Does the thing")]
 fn dothething2<U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E>, E: Display>(
-    #[context] ctx: AppState<Arc<ConfigSeed>, (Option<String>, String, bool, U)>,
+    #[parent_data] parent_data: (Option<String>, String, bool, U),
     #[arg(stdin)] structured2: U,
 ) -> Result<String, RpcError> {
     Ok(format!(
         "{:?}, {}, {}, {}, {}",
-        ctx.data.0,
-        ctx.data.1,
-        ctx.data.2,
-        serde_json::to_string_pretty(&ctx.data.3)?,
+        parent_data.0,
+        parent_data.1,
+        parent_data.2,
+        serde_json::to_string_pretty(&parent_data.3)?,
         serde_json::to_string_pretty(&structured2)?,
     ))
 }
@@ -134,7 +130,7 @@ async fn test_rpc() {
     });
     let server = rpc_server!({
         command: dothething::<String, _>,
-        context: AppState { seed, data: () },
+        context: AppState(seed),
         middleware: [
             cors,
         ],
@@ -192,14 +188,8 @@ fn cli_test() {
         host: Host::parse("localhost").unwrap(),
         port: 8000,
     });
-    dothething::cli_handler::<String, _, _>(
-        AppState { seed, data: () },
-        None,
-        &matches,
-        "".into(),
-        (),
-    )
-    .unwrap();
+    dothething::cli_handler::<String, _, _, _>(AppState(seed), (), None, &matches, "".into(), ())
+        .unwrap();
 }
 
 #[test]
@@ -210,14 +200,11 @@ fn cli_example() {
         app => app
             .arg(Arg::with_name("host").long("host").short("h").takes_value(true))
             .arg(Arg::with_name("port").long("port").short("p").takes_value(true)),
-        matches => AppState { seed: Arc::new(ConfigSeed {
+        matches => AppState(Arc::new(ConfigSeed {
             host: Host::parse(matches.value_of("host").unwrap_or("localhost")).unwrap(),
             port: matches.value_of("port").unwrap_or("8000").parse().unwrap(),
-        }), data: () }
+        }))
     )
 }
 
-fn type_check() {
-    let middleware: DynMiddleware<dothething::Metadata> = todo!();
-    constrain_middleware(&middleware);
-}
+////////////////////////////////////////////////

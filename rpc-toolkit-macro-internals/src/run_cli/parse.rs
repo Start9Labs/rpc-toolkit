@@ -45,6 +45,14 @@ impl Parse for RunCliArgs {
         if !input.is_empty() {
             let _: token::Comma = input.parse()?;
         }
+        if !input.is_empty() {
+            let _: token::Comma = input.parse()?;
+        }
+        let parent_data = if !input.is_empty() {
+            Some(input.parse()?)
+        } else {
+            None
+        };
         let exit_fn = if !input.is_empty() {
             Some(input.parse()?)
         } else {
@@ -54,6 +62,7 @@ impl Parse for RunCliArgs {
             command,
             mut_app,
             make_ctx,
+            parent_data,
             exit_fn,
         })
     }

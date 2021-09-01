@@ -96,6 +96,7 @@ pub enum ParamType {
     None,
     Arg(ArgOptions),
     Context(Type),
+    ParentData(Type),
     Request,
     Response,
 }

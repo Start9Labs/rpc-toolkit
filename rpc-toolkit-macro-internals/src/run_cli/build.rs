@@ -13,6 +13,7 @@ pub fn build(args: RunCliArgs) -> TokenStream {
     let command = command_handler.clone();
     if let PathArguments::AngleBracketed(a) = &mut arguments {
         a.args.push(syn::parse2(quote! { () }).unwrap());
+        a.args.push(syn::parse2(quote! { _ }).unwrap());
     }
     command_handler.segments.push(PathSegment {
         ident: Ident::new("cli_handler", command.span()),
@@ -42,6 +43,11 @@ pub fn build(args: RunCliArgs) -> TokenStream {
     } else {
         quote! { &rpc_toolkit_matches }
     };
+    let parent_data = if let Some(data) = args.parent_data {
+        quote! { #data }
+    } else {
+        quote! { () }
+    };
     let exit_fn = args.exit_fn.unwrap_or_else(|| {
         syn::parse2(quote! { |err: ::rpc_toolkit::yajrc::RpcError| {
             eprintln!("{}", err.message);
@@ -56,8 +62,10 @@ pub fn build(args: RunCliArgs) -> TokenStream {
         {
             let rpc_toolkit_matches = #app.get_matches();
             let rpc_toolkit_ctx = #make_ctx;
+            let rpc_toolkit_parent_data = #parent_data;
             if let Err(err) = #command_handler(
                 rpc_toolkit_ctx,
+                rpc_toolkit_parent_data,
                 None,
                 &rpc_toolkit_matches,
                 "".into(),

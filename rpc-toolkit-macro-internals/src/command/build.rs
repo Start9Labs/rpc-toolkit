@@ -5,10 +5,28 @@ use quote::*;
 use syn::fold::Fold;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::token::{Comma, Where};
+use syn::token::{Add, Comma, Where};
 
 use super::parse::*;
 use super::*;
+
+fn ctx_trait(ctx_ty: Type, opt: &Options) -> TokenStream {
+    let mut bounds: Punctuated<TypeParamBound, Add> = Punctuated::new();
+    bounds.push(macro_try!(parse2(quote! { Into<#ctx_ty> })));
+    bounds.push(macro_try!(parse2(quote! { ::rpc_toolkit::Context })));
+    if let Options::Parent(ParentOptions { subcommands, .. }) = opt {
+        bounds.push(macro_try!(parse2(quote! { Clone })));
+        for subcmd in subcommands {
+            let mut path = subcmd.clone();
+            std::mem::take(&mut path.segments.last_mut().unwrap().arguments);
+            bounds.push(macro_try!(parse2(quote! { #path::CommandContext })));
+        }
+    }
+    quote! {
+        pub trait CommandContext: #bounds {}
+        impl<T> CommandContext for T where T: #bounds {}
+    }
+}
 
 fn metadata(full_options: &Options) -> TokenStream {
     let options = match full_options {
@@ -395,8 +413,18 @@ fn rpc_handler(
     opt: &Options,
     params: &[ParamType],
 ) -> TokenStream {
+    let mut parent_data_ty = quote! { () };
+    let mut generics = fn_generics.clone();
+    generics.params.push(macro_try!(syn::parse2(
+        quote! { GenericContext: CommandContext }
+    )));
+    if generics.lt_token.is_none() {
+        generics.lt_token = Some(Default::default());
+    }
+    if generics.gt_token.is_none() {
+        generics.gt_token = Some(Default::default());
+    }
     let mut param_def = Vec::new();
-    let mut ctx_ty = quote! { () };
     for param in params {
         match param {
             ParamType::Arg(arg) => {
@@ -412,9 +440,7 @@ fn rpc_handler(
                     #field_name: #ty,
                 })
             }
-            ParamType::Context(ctx) => {
-                ctx_ty = quote! { #ctx };
-            }
+            ParamType::ParentData(ty) => parent_data_ty = quote! { #ty },
             _ => (),
         }
     }
@@ -447,7 +473,16 @@ fn rpc_handler(
             let field_name = Ident::new(&format!("arg_{}", name), name.span());
             quote! { args.#field_name }
         }
-        ParamType::Context(_) => quote! { ctx },
+        ParamType::Context(ty) => {
+            if matches!(opt, Options::Parent { .. }) {
+                quote! { <GenericContext as Into<#ty>>::into(ctx.clone()) }
+            } else {
+                quote! { <GenericContext as Into<#ty>>::into(ctx) }
+            }
+        }
+        ParamType::ParentData(_) => {
+            quote! { parent_data }
+        }
         ParamType::Request => quote! { request },
         ParamType::Response => quote! { response },
         ParamType::None => unreachable!(),
@@ -456,8 +491,9 @@ fn rpc_handler(
         Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::CliOnly(_)) => quote! {
             #param_struct_def
 
-            pub async fn rpc_handler#fn_generics(
-                _ctx: #ctx_ty,
+            pub async fn rpc_handler#generics(
+                _ctx: GenericContext,
+                _parent_data: #parent_data_ty,
                 _request: &::rpc_toolkit::command_helpers::prelude::RequestParts,
                 _response: &mut ::rpc_toolkit::command_helpers::prelude::ResponseParts,
                 method: &str,
@@ -486,8 +522,9 @@ fn rpc_handler(
             quote! {
                 #param_struct_def
 
-                pub async fn rpc_handler#fn_generics(
-                    ctx: #ctx_ty,
+                pub async fn rpc_handler#generics(
+                    ctx: GenericContext,
+                    parent_data: #parent_data_ty,
                     request: &::rpc_toolkit::command_helpers::prelude::RequestParts,
                     response: &mut ::rpc_toolkit::command_helpers::prelude::ResponseParts,
                     method: &str,
@@ -511,28 +548,39 @@ fn rpc_handler(
         }) => {
             let cmd_preprocess = if common.is_async {
                 quote! {
-                    let ctx = #fn_path(#(#param),*).await?;
+                    let parent_data = #fn_path(#(#param),*).await?;
                 }
             } else if common.blocking.is_some() {
                 quote! {
-                    let ctx = ::rpc_toolkit::command_helpers::prelude::spawn_blocking(move || #fn_path(#(#param),*)).await?;
+                    let parent_data = ::rpc_toolkit::command_helpers::prelude::spawn_blocking(move || #fn_path(#(#param),*)).await?;
                 }
             } else {
                 quote! {
-                    let ctx = #fn_path(#(#param),*)?;
+                    let parent_data = #fn_path(#(#param),*)?;
                 }
             };
             let subcmd_impl = subcommands.iter().map(|subcommand| {
                 let mut subcommand = subcommand.clone();
-                let rpc_handler = PathSegment {
+                let mut rpc_handler = PathSegment {
                     ident: Ident::new("rpc_handler", Span::call_site()),
                     arguments: std::mem::replace(
                         &mut subcommand.segments.last_mut().unwrap().arguments,
                         PathArguments::None,
                     ),
                 };
+                rpc_handler.arguments = match rpc_handler.arguments {
+                    PathArguments::None => PathArguments::AngleBracketed(
+                        syn::parse2(quote! { ::<GenericContext> })
+                            .unwrap(),
+                    ),
+                    PathArguments::AngleBracketed(mut a) => {
+                        a.args.push(syn::parse2(quote! { GenericContext }).unwrap());
+                        PathArguments::AngleBracketed(a)
+                    }
+                    _ => unreachable!(),
+                };
                 quote_spanned!{ subcommand.span() =>
-                    [#subcommand::NAME, rest] => #subcommand::#rpc_handler(ctx, request, response, rest, ::rpc_toolkit::command_helpers::prelude::from_value(args.rest)?).await
+                    [#subcommand::NAME, rest] => #subcommand::#rpc_handler(ctx, parent_data, request, response, rest, ::rpc_toolkit::command_helpers::prelude::from_value(args.rest)?).await
                 }
             });
             let subcmd_impl = quote! {
@@ -551,22 +599,26 @@ fn rpc_handler(
                     let self_impl_fn = &self_impl.path;
                     let self_impl = if self_impl.is_async {
                         quote_spanned! { self_impl_fn.span() =>
-                            #self_impl_fn(ctx).await?
+                            #self_impl_fn(Into::into(ctx), parent_data).await?
                         }
                     } else if self_impl.blocking {
                         quote_spanned! { self_impl_fn.span() =>
-                            ::rpc_toolkit::command_helpers::prelude::spawn_blocking(move || #self_impl_fn(ctx)).await?
+                            {
+                                let ctx = Into::into(ctx);
+                                ::rpc_toolkit::command_helpers::prelude::spawn_blocking(move || #self_impl_fn(ctx, parent_data)).await?
+                            }
                         }
                     } else {
                         quote_spanned! { self_impl_fn.span() =>
-                            #self_impl_fn(ctx)?
+                            #self_impl_fn(Into::into(ctx), parent_data)?
                         }
                     };
                     quote! {
                         #param_struct_def
 
-                        pub async fn rpc_handler#fn_generics(
-                            ctx: #ctx_ty,
+                        pub async fn rpc_handler#generics(
+                            ctx: GenericContext,
+                            parent_data: #parent_data_ty,
                             request: &::rpc_toolkit::command_helpers::prelude::RequestParts,
                             response: &mut ::rpc_toolkit::command_helpers::prelude::ResponseParts,
                             method: &str,
@@ -586,8 +638,9 @@ fn rpc_handler(
                     quote! {
                         #param_struct_def
 
-                        pub async fn rpc_handler#fn_generics(
-                            ctx: #ctx_ty,
+                        pub async fn rpc_handler#generics(
+                            ctx: GenericContext,
+                            parent_data: #parent_data_ty,
                             request: &::rpc_toolkit::command_helpers::prelude::RequestParts,
                             response: &mut ::rpc_toolkit::command_helpers::prelude::ResponseParts,
                             method: &str,
@@ -610,18 +663,13 @@ fn cli_handler(
     opt: &mut Options,
     params: &[ParamType],
 ) -> TokenStream {
-    let mut ctx_ty = quote! { () };
-    for param in params {
-        match param {
-            ParamType::Context(ctx) => {
-                ctx_ty = quote! { #ctx };
-            }
-            _ => (),
-        }
-    }
+    let mut parent_data_ty = quote! { () };
     let mut generics = fn_generics.clone();
     generics.params.push(macro_try!(syn::parse2(
         quote! { ParentParams: ::rpc_toolkit::command_helpers::prelude::Serialize }
+    )));
+    generics.params.push(macro_try!(syn::parse2(
+        quote! { GenericContext: CommandContext }
     )));
     if generics.lt_token.is_none() {
         generics.lt_token = Some(Default::default());
@@ -632,13 +680,24 @@ fn cli_handler(
     let (_, fn_type_generics, _) = fn_generics.split_for_impl();
     let fn_turbofish = fn_type_generics.as_turbofish();
     let fn_path: Path = macro_try!(syn::parse2(quote! { super::#fn_name#fn_turbofish }));
+    let is_parent = matches!(opt, Options::Parent { .. });
     let param = params.iter().map(|param| match param {
         ParamType::Arg(arg) => {
             let name = arg.name.clone().unwrap();
             let field_name = Ident::new(&format!("arg_{}", name), name.span());
             quote! { params.#field_name.clone() }
         }
-        ParamType::Context(_) => quote! { ctx },
+        ParamType::Context(ty) => {
+            if is_parent {
+                quote! { <GenericContext as Into<#ty>>::into(ctx.clone()) }
+            } else {
+                quote! { <GenericContext as Into<#ty>>::into(ctx) }
+            }
+        }
+        ParamType::ParentData(ty) => {
+            parent_data_ty = quote! { #ty };
+            quote! { parent_data }
+        }
         ParamType::Request => quote! { request },
         ParamType::Response => quote! { response },
         ParamType::None => unreachable!(),
@@ -654,10 +713,10 @@ fn cli_handler(
         ParentParams: ::rpc_toolkit::command_helpers::prelude::Serialize
     })));
     if param_generics.lt_token.is_none() {
-        generics.lt_token = Some(Default::default());
+        param_generics.lt_token = Some(Default::default());
     }
     if param_generics.gt_token.is_none() {
-        generics.gt_token = Some(Default::default());
+        param_generics.gt_token = Some(Default::default());
     }
     let (_, param_ty_generics, _) = param_generics.split_for_impl();
     let mut arg_def = Vec::new();
@@ -777,7 +836,8 @@ fn cli_handler(
     match opt {
         Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::RpcOnly(_)) => quote! {
             pub fn cli_handler#generics(
-                _ctx: #ctx_ty,
+                _ctx: (),
+                _parent_data: #parent_data_ty,
                 _rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
                 _matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
                 method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
@@ -802,7 +862,8 @@ fn cli_handler(
             };
             quote! {
                 pub fn cli_handler#generics(
-                    ctx: #ctx_ty,
+                    ctx: GenericContext,
+                    parent_data: #parent_data_ty,
                     mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
                     matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
                     method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
@@ -816,6 +877,9 @@ fn cli_handler(
                     let return_ty = if true {
                         ::rpc_toolkit::command_helpers::prelude::PhantomData
                     } else {
+                        let ctx_new = unreachable!();
+                        ::rpc_toolkit::command_helpers::prelude::match_types(&ctx, &ctx_new);
+                        let ctx = ctx_new;
                         ::rpc_toolkit::command_helpers::prelude::make_phantom(#invocation)
                     };
 
@@ -830,13 +894,25 @@ fn cli_handler(
             } = opt.exec_ctx
             {
                 let fn_path = cli;
+                let cli_param = params.iter().filter_map(|param| match param {
+                    ParamType::Arg(arg) => {
+                        let name = arg.name.clone().unwrap();
+                        let field_name = Ident::new(&format!("arg_{}", name), name.span());
+                        Some(quote! { params.#field_name.clone() })
+                    }
+                    ParamType::Context(_) => Some(quote! { Into::into(ctx) }),
+                    ParamType::ParentData(_) => Some(quote! { parent_data }),
+                    ParamType::Request => None,
+                    ParamType::Response => None,
+                    ParamType::None => unreachable!(),
+                });
                 let invocation = if is_async {
                     quote! {
-                        rt_ref.block_on(#fn_path(#(#param),*))?
+                        rt_ref.block_on(#fn_path(#(#cli_param),*))?
                     }
                 } else {
                     quote! {
-                        #fn_path(#(#param),*)?
+                        #fn_path(#(#cli_param),*)?
                     }
                 };
                 let display_res = if let Some(display_fn) = &opt.display {
@@ -857,7 +933,8 @@ fn cli_handler(
                 };
                 quote! {
                     pub fn cli_handler#generics(
-                        ctx: #ctx_ty,
+                        ctx: GenericContext,
+                        parent_data: #parent_data_ty,
                         mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
                         matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
                         _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
@@ -898,7 +975,8 @@ fn cli_handler(
                 };
                 quote! {
                     pub fn cli_handler#generics(
-                        ctx: #ctx_ty,
+                        ctx: GenericContext,
+                        parent_data: #parent_data_ty,
                         mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
                         matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
                         _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
@@ -921,11 +999,11 @@ fn cli_handler(
             let cmd_preprocess = if common.is_async {
                 quote! {
                     #create_rt
-                    let ctx = rt_ref.block_on(#fn_path(#(#param),*))?;
+                    let parent_data = rt_ref.block_on(#fn_path(#(#param),*))?;
                 }
             } else {
                 quote! {
-                    let ctx = #fn_path(#(#param),*)?;
+                    let parent_data = #fn_path(#(#param),*)?;
                 }
             };
             let subcmd_impl = subcommands.iter().map(|subcommand| {
@@ -939,11 +1017,13 @@ fn cli_handler(
                 };
                 cli_handler.arguments = match cli_handler.arguments {
                     PathArguments::None => PathArguments::AngleBracketed(
-                        syn::parse2(quote! { ::<Params#param_ty_generics> }).unwrap(),
+                        syn::parse2(quote! { ::<Params#param_ty_generics, GenericContext> })
+                            .unwrap(),
                     ),
                     PathArguments::AngleBracketed(mut a) => {
                         a.args
                             .push(syn::parse2(quote! { Params#param_ty_generics }).unwrap());
+                        a.args.push(syn::parse2(quote! { GenericContext }).unwrap());
                         PathArguments::AngleBracketed(a)
                     }
                     _ => unreachable!(),
@@ -955,26 +1035,34 @@ fn cli_handler(
                         } else {
                             method + "." + #subcommand::NAME
                         };
-                        #subcommand::#cli_handler(ctx, rt, sub_m, method, params)
+                        #subcommand::#cli_handler(ctx, parent_data, rt, sub_m, method, params)
                     },
                 }
             });
             let self_impl = match (self_impl, &common.exec_ctx) {
-                (Some(self_impl), ExecutionContext::CliOnly(_)) => {
-                    let self_impl_fn = &self_impl.path;
+                (Some(self_impl), ExecutionContext::CliOnly(_))
+                | (Some(self_impl), ExecutionContext::Local(_))
+                | (Some(self_impl), ExecutionContext::CustomCli { .. }) => {
+                    let (self_impl_fn, is_async) =
+                        if let ExecutionContext::CustomCli { cli, is_async, .. } = &common.exec_ctx
+                        {
+                            (cli, *is_async)
+                        } else {
+                            (&self_impl.path, self_impl.is_async)
+                        };
                     let create_rt = if common.is_async {
                         None
                     } else {
                         Some(create_rt)
                     };
-                    let self_impl = if self_impl.is_async {
+                    let self_impl = if is_async {
                         quote_spanned! { self_impl_fn.span() =>
                             #create_rt
-                            rt_ref.block_on(#self_impl_fn(ctx))?
+                            rt_ref.block_on(#self_impl_fn(Into::into(ctx), parent_data))?
                         }
                     } else {
                         quote_spanned! { self_impl_fn.span() =>
-                            #self_impl_fn(ctx)?
+                            #self_impl_fn(Into::into(ctx), parent_data)?
                         }
                     };
                     quote! {
@@ -985,11 +1073,11 @@ fn cli_handler(
                     let self_impl_fn = &self_impl.path;
                     let self_impl = if self_impl.is_async {
                         quote! {
-                            rt_ref.block_on(#self_impl_fn(ctx))
+                            rt_ref.block_on(#self_impl_fn(Into::into(ctx), parent_data))
                         }
                     } else {
                         quote! {
-                            #self_impl_fn(ctx)
+                            #self_impl_fn(Into::into(ctx), parent_data)
                         }
                     };
                     let create_rt = if common.is_async {
@@ -1016,7 +1104,7 @@ fn cli_handler(
                         }
                     }
                 }
-                _ => quote! {
+                (None, _) | (Some(_), ExecutionContext::RpcOnly(_)) => quote! {
                     Err(::rpc_toolkit::command_helpers::prelude::RpcError {
                         data: Some(method.into()),
                         ..::rpc_toolkit::command_helpers::prelude::yajrc::METHOD_NOT_FOUND_ERROR
@@ -1025,7 +1113,8 @@ fn cli_handler(
             };
             quote! {
                 pub fn cli_handler#generics(
-                    ctx: #ctx_ty,
+                    ctx: GenericContext,
+                    parent_data: #parent_data_ty,
                     mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
                     matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
                     method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
@@ -1071,6 +1160,17 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
             .map(|a| a.span())
             .unwrap_or_else(Span::call_site),
     );
+    let ctx_ty = params
+        .iter()
+        .find_map(|a| {
+            if let ParamType::Context(ty) = a {
+                Some(ty.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or(macro_try!(syn::parse2(quote! { () })));
+    let ctx_trait = ctx_trait(ctx_ty, &opt);
     let metadata = metadata(&mut opt);
     let build_app = build_app(command_name_str.clone(), &mut opt, &mut params);
     let rpc_handler = rpc_handler(fn_name, fn_generics, &opt, &params);
@@ -1083,6 +1183,8 @@ pub fn build(args: AttributeArgs, mut item: ItemFn) -> TokenStream {
 
             pub const NAME: &'static str = #command_name_str;
             pub const ASYNC: bool = #is_async;
+
+            #ctx_trait
 
             #metadata
 
