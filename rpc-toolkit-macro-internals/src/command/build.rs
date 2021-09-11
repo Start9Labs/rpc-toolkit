@@ -886,7 +886,7 @@ fn cli_handler(
     match opt {
         Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::RpcOnly(_)) => quote! {
             pub fn cli_handler#generics(
-                _ctx: (),
+                _ctx: GenericContext,
                 _parent_data: #parent_data_ty,
                 _rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
                 _matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
