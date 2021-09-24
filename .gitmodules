@@ -1,0 +1,3 @@
+[submodule "yajrc"]
+	path = yajrc
+	url = git@github.com:dr-bonez/yajrc.git
