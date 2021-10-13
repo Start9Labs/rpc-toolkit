@@ -1,3 +1,4 @@
 [submodule "yajrc"]
 	path = yajrc
 	url = https://github.com/dr-bonez/yajrc.git
+	branch = develop
