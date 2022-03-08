@@ -51,9 +51,9 @@ async fn dothething<
     E: Display,
 >(
     #[context] _ctx: AppState,
-    #[arg(short = "a")] arg1: Option<String>,
-    #[arg(short = "b")] val: String,
-    #[arg(short = "c", help = "I am the flag `c`!")] arg3: bool,
+    #[arg(short = 'a')] arg1: Option<String>,
+    #[arg(short = 'b')] val: String,
+    #[arg(short = 'c', help = "I am the flag `c`!")] arg3: bool,
     #[arg(stdin)] structured: U,
 ) -> Result<(Option<String>, String, bool, U), RpcError> {
     Ok((arg1, val, arg3, structured))
