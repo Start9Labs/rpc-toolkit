@@ -2,7 +2,9 @@
 authors = ["Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
 name = "rpc-toolkit-macro"
-version = "0.1.0"
+version = "0.2.0"
+description = "macros for rpc-toolkit"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,5 +13,5 @@ proc-macro = true
 
 [dependencies]
 proc-macro2 = "1.0"
-rpc-toolkit-macro-internals = { path = "../rpc-toolkit-macro-internals" }
+rpc-toolkit-macro-internals = { version = "0.2", path = "../rpc-toolkit-macro-internals" }
 syn = "1.0"
