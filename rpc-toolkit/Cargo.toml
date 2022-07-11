@@ -10,9 +10,9 @@ cbor = ["serde_cbor"]
 default = ["cbor"]
 
 [dependencies]
-clap = "2.33.3"
-futures = "0.3.15"
-hyper = { version = "0.14.5", features = [
+clap = "3"
+futures = "0.3"
+hyper = { version = "0.14", features = [
     "server",
     "http1",
     "http2",
@@ -20,13 +20,14 @@ hyper = { version = "0.14.5", features = [
     "stream",
     "client",
 ] }
-lazy_static = "1.4.0"
-reqwest = { version = "0.11.2" }
+lazy_static = "1.4"
+openssl = { version = "0.10", features = ["vendored"] }
+reqwest = { version = "0.11" }
 rpc-toolkit-macro = { path = "../rpc-toolkit-macro" }
-serde = { version = "1.0.125", features = ["derive"] }
-serde_cbor = { version = "0.11.1", optional = true }
-serde_json = "1.0.64"
-thiserror = "1.0.24"
-tokio = { version = "1.4.0", features = ["full"] }
-url = "2.2.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_cbor = { version = "0.11", optional = true }
+serde_json = "1.0"
+thiserror = "1.0"
+tokio = { version = "1", features = ["full"] }
+url = "2.2.2"
 yajrc = { version = "*", path = "../yajrc" }

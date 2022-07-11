@@ -338,7 +338,7 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
     let required = LitBool::new(subcommand_required, Span::call_site());
     let alias = &opt.common().aliases;
     quote! {
-        pub fn build_app() -> ::rpc_toolkit::command_helpers::prelude::App<'static, 'static> {
+        pub fn build_app() -> ::rpc_toolkit::command_helpers::prelude::App<'static> {
             let mut app = ::rpc_toolkit::command_helpers::prelude::App::new(#name);
             #(
                 app = app.about(#about);
@@ -889,7 +889,7 @@ fn cli_handler(
                 _ctx: GenericContext,
                 _parent_data: #parent_data_ty,
                 _rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
-                _matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                _matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches,
                 method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                 _parent_params: ParentParams,
             ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
@@ -915,7 +915,7 @@ fn cli_handler(
                     ctx: GenericContext,
                     parent_data: #parent_data_ty,
                     mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
-                    matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                    matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches,
                     method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                     parent_params: ParentParams,
                 ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
@@ -986,7 +986,7 @@ fn cli_handler(
                         ctx: GenericContext,
                         parent_data: #parent_data_ty,
                         mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
-                        matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                        matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches,
                         _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                         parent_params: ParentParams
                     ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
@@ -1028,7 +1028,7 @@ fn cli_handler(
                         ctx: GenericContext,
                         parent_data: #parent_data_ty,
                         mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
-                        matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                        matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches,
                         _method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                         parent_params: ParentParams
                     ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {
@@ -1079,7 +1079,7 @@ fn cli_handler(
                     _ => unreachable!(),
                 };
                 quote_spanned! { subcommand.span() =>
-                    (#subcommand::NAME, Some(sub_m)) => {
+                    Some((#subcommand::NAME, sub_m)) => {
                         let method = if method.is_empty() {
                             #subcommand::NAME.into()
                         } else {
@@ -1163,7 +1163,7 @@ fn cli_handler(
                     ctx: GenericContext,
                     parent_data: #parent_data_ty,
                     mut rt: Option<::rpc_toolkit::command_helpers::prelude::Runtime>,
-                    matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches<'_>,
+                    matches: &::rpc_toolkit::command_helpers::prelude::ArgMatches,
                     method: ::rpc_toolkit::command_helpers::prelude::Cow<'_, str>,
                     parent_params: ParentParams,
                 ) -> Result<(), ::rpc_toolkit::command_helpers::prelude::RpcError> {

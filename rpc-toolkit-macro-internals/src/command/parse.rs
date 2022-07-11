@@ -728,13 +728,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                         return Err(Error::new(p.span(), "`rename` must be assigned to"));
                     }
                     NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("short") => {
-                        if let Lit::Str(short) = nv.lit {
-                            if short.value().len() != 1 {
-                                return Err(Error::new(
-                                    short.span(),
-                                    "`short` value must be 1 character",
-                                ));
-                            }
+                        if let Lit::Char(short) = nv.lit {
                             if opt.short.is_some() {
                                 return Err(Error::new(short.span(), "duplicate argument `short`"));
                             }
@@ -746,7 +740,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                             }
                             opt.short = Some(short);
                         } else {
-                            return Err(Error::new(nv.lit.span(), "`short` must be a string"));
+                            return Err(Error::new(nv.lit.span(), "`short` must be a char"));
                         }
                     }
                     NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("short") => {

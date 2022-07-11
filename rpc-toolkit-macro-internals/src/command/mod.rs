@@ -86,7 +86,7 @@ pub struct ArgOptions {
     help: Option<LitStr>,
     name: Option<Ident>,
     rename: Option<LitStr>,
-    short: Option<LitStr>,
+    short: Option<LitChar>,
     long: Option<LitStr>,
     parse: Option<Path>,
     default: Option<LitStr>,

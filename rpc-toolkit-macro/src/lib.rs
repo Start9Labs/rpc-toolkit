@@ -16,10 +16,10 @@ pub fn command(args: TokenStream, item: TokenStream) -> TokenStream {
 /// - `#[arg(short = "a")]` -> Set the "short" representation of the arg to `-a` on the CLI
 /// - `#[arg(long = "arg")]` -> Set the "long" representation of the arg to `--arg` on the CLI
 /// - `#[arg(parse(custom_parse_fn))]` -> Use the function `custom_parse_fn` to parse the arg from the CLI
-///   - `custom_parse_fn :: Into<RpcError> err => (&str, &ArgMatches<'_>) -> Result<arg, err>`
+///   - `custom_parse_fn :: Into<RpcError> err => (&str, &ArgMatches) -> Result<arg, err>`
 ///   - note: `arg` is the type of the argument
 /// - `#[arg(stdin)]` -> Parse the argument from stdin when using the CLI
-///   - `custom_parse_fn :: Into<RpcError> err => (&[u8], &ArgMatches<'_>) -> Result<arg, err>`
+///   - `custom_parse_fn :: Into<RpcError> err => (&[u8], &ArgMatches) -> Result<arg, err>`
 /// - `#[arg(count)]` -> Treat argument as flag, count occurrences
 /// - `#[arg(multiple)]` -> Allow the arg to be specified multiple times. Collect the args after parsing.
 #[proc_macro_attribute]

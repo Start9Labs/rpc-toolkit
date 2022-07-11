@@ -96,7 +96,7 @@ pub async fn call_remote<Ctx: Context, Params: Serialize, Res: for<'de> Deserial
 
 pub fn default_arg_parser<T: FromStr<Err = E>, E: Display>(
     arg: &str,
-    _: &ArgMatches<'_>,
+    _: &ArgMatches,
 ) -> Result<T, RpcError> {
     arg.parse().map_err(|e| RpcError {
         data: Some(format!("{}", e).into()),
@@ -106,7 +106,7 @@ pub fn default_arg_parser<T: FromStr<Err = E>, E: Display>(
 
 pub fn default_stdin_parser<T: FromStr<Err = E>, E: Display>(
     stdin: &mut Stdin,
-    _: &ArgMatches<'_>,
+    _: &ArgMatches,
 ) -> Result<T, RpcError> {
     let mut s = String::new();
     stdin.read_line(&mut s).map_err(|e| RpcError {
@@ -125,6 +125,6 @@ pub fn default_stdin_parser<T: FromStr<Err = E>, E: Display>(
     })
 }
 
-pub fn default_display<T: Display>(t: T, _: &ArgMatches<'_>) {
+pub fn default_display<T: Display>(t: T, _: &ArgMatches) {
     println!("{}", t)
 }

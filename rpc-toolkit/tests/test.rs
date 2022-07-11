@@ -51,9 +51,9 @@ async fn dothething<
     E: Display,
 >(
     #[context] _ctx: AppState,
-    #[arg(short = "a")] arg1: Option<String>,
-    #[arg(short = "b")] val: String,
-    #[arg(short = "c", help = "I am the flag `c`!")] arg3: bool,
+    #[arg(short = 'a')] arg1: Option<String>,
+    #[arg(short = 'b')] val: String,
+    #[arg(short = 'c', help = "I am the flag `c`!")] arg3: bool,
     #[arg(stdin)] structured: U,
 ) -> Result<(Option<String>, String, bool, U), RpcError> {
     Ok((arg1, val, arg3, structured))
@@ -198,8 +198,8 @@ fn cli_example() {
     run_cli! ({
         command: dothething::<String, _>,
         app: app => app
-            .arg(Arg::with_name("host").long("host").short("h").takes_value(true))
-            .arg(Arg::with_name("port").long("port").short("p").takes_value(true)),
+            .arg(Arg::with_name("host").long("host").short('h').takes_value(true))
+            .arg(Arg::with_name("port").long("port").short('p').takes_value(true)),
         context: matches => AppState(Arc::new(ConfigSeed {
             host: Host::parse(matches.value_of("host").unwrap_or("localhost")).unwrap(),
             port: matches.value_of("port").unwrap_or("8000").parse().unwrap(),
