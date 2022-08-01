@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "rpc-toolkit"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "futures",
@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "rpc-toolkit-macro"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "rpc-toolkit-macro-internals",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "rpc-toolkit-macro-internals"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
