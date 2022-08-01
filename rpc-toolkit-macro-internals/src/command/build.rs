@@ -941,7 +941,7 @@ fn cli_handler(
             }
         },
         Options::Leaf(opt) if matches!(opt.exec_ctx, ExecutionContext::Standard) => {
-            let param = param.map(|_| quote! { unreachable!() });
+            let param = param.into_iter().map(|_| quote! { unreachable!() });
             let invocation = if opt.is_async {
                 quote! {
                     rt_ref.block_on(#fn_path(#(#param),*))?
