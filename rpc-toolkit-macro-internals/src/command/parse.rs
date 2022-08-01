@@ -785,7 +785,7 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                                     "duplicate argument `default`",
                                 ));
                             }
-                            opt.default = Some(default);
+                            opt.default = Some(Some(default));
                         } else {
                             return Err(Error::new(nv.lit.span(), "`default` must be a string"));
                         }
@@ -797,7 +797,10 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                         ));
                     }
                     NestedMeta::Meta(Meta::Path(p)) if p.is_ident("default") => {
-                        return Err(Error::new(p.span(), "`default` must be assigned to"));
+                        if opt.default.is_some() {
+                            return Err(Error::new(p.span(), "duplicate argument `default`"));
+                        }
+                        opt.default = Some(None);
                     }
                     _ => {
                         return Err(Error::new(arg.span(), "unknown argument"));

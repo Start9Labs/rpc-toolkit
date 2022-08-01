@@ -293,9 +293,9 @@ fn build_app(name: LitStr, opt: &mut Options, params: &mut [ParamType]) -> Token
                         modifications.extend(quote_spanned! { ty_span =>
                             arg = arg.takes_value(true);
                         });
-                        if let Some(default) = &arg.default {
+                        if let Some(_) = &arg.default {
                             modifications.extend(quote_spanned! { ty_span =>
-                                arg = arg.default_value(#default);
+                                arg = arg.required(false);
                             });
                         } else if p.path.segments.last().unwrap().ident == "Option" {
                             arg.optional = true;
@@ -485,10 +485,26 @@ fn rpc_handler(
                     .unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
                 let field_name = Ident::new(&format!("arg_{}", name), name.span());
                 let ty = arg.ty.clone();
-                param_def.push(quote! {
+                let def = quote! {
                     #[serde(rename = #rename)]
                     #field_name: #ty,
-                })
+                };
+                let def = match &arg.default {
+                    Some(Some(default)) => {
+                        quote! {
+                            #[serde(default = #default)]
+                            #def
+                        }
+                    }
+                    Some(None) => {
+                        quote! {
+                            #[serde(default)]
+                            #def
+                        }
+                    }
+                    None => def,
+                };
+                param_def.push(def);
             }
             ParamType::ParentData(ty) => parent_data_ty = quote! { #ty },
             _ => (),
@@ -780,6 +796,10 @@ fn cli_handler(
                     .unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
                 let field_name = Ident::new(&format!("arg_{}", name), name.span());
                 let ty = arg.ty.clone();
+                let mut ty = quote! { #ty };
+                if arg.default.is_some() && !arg.optional {
+                    ty = quote! { Option<#ty> };
+                }
                 arg_def.push(quote! {
                     #[serde(rename = #rename)]
                     #field_name: #ty,
@@ -829,7 +849,7 @@ fn cli_handler(
                         ::rpc_toolkit::command_helpers::prelude::default_arg_parser(arg_val, matches)
                     }
                 };
-                if arg.optional {
+                if arg.optional || arg.default.is_some() {
                     quote! {
                         #field_name: if let Some(arg_val) = matches.value_of(#arg_name) {
                             Some(#parse_val?)

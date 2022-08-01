@@ -89,7 +89,7 @@ pub struct ArgOptions {
     short: Option<LitChar>,
     long: Option<LitStr>,
     parse: Option<Path>,
-    default: Option<LitStr>,
+    default: Option<Option<LitStr>>,
     count: Option<Path>,
     multiple: Option<Path>,
     stdin: Option<Path>,
