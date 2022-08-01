@@ -747,27 +747,30 @@ fn cli_handler(
     let fn_turbofish = fn_type_generics.as_turbofish();
     let fn_path: Path = macro_try!(syn::parse2(quote! { super::#fn_name#fn_turbofish }));
     let is_parent = matches!(opt, Options::Parent { .. });
-    let param = params.iter().map(|param| match param {
-        ParamType::Arg(arg) => {
-            let name = arg.name.clone().unwrap();
-            let field_name = Ident::new(&format!("arg_{}", name), name.span());
-            quote! { params.#field_name.clone() }
-        }
-        ParamType::Context(ty) => {
-            if is_parent {
-                quote! { <GenericContext as Into<#ty>>::into(ctx.clone()) }
-            } else {
-                quote! { <GenericContext as Into<#ty>>::into(ctx) }
+    let param: Vec<_> = params
+        .iter()
+        .map(|param| match param {
+            ParamType::Arg(arg) => {
+                let name = arg.name.clone().unwrap();
+                let field_name = Ident::new(&format!("arg_{}", name), name.span());
+                quote! { params.#field_name.clone() }
             }
-        }
-        ParamType::ParentData(ty) => {
-            parent_data_ty = quote! { #ty };
-            quote! { parent_data }
-        }
-        ParamType::Request => quote! { request },
-        ParamType::Response => quote! { response },
-        ParamType::None => unreachable!(),
-    });
+            ParamType::Context(ty) => {
+                if is_parent {
+                    quote! { <GenericContext as Into<#ty>>::into(ctx.clone()) }
+                } else {
+                    quote! { <GenericContext as Into<#ty>>::into(ctx) }
+                }
+            }
+            ParamType::ParentData(ty) => {
+                parent_data_ty = quote! { #ty };
+                quote! { parent_data }
+            }
+            ParamType::Request => quote! { request },
+            ParamType::Response => quote! { response },
+            ParamType::None => unreachable!(),
+        })
+        .collect();
     let mut param_generics_filter = GenericFilter::new(fn_generics);
     for param in params {
         if let ParamType::Arg(a) = param {
