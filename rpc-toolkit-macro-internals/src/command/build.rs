@@ -796,10 +796,6 @@ fn cli_handler(
                     .unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
                 let field_name = Ident::new(&format!("arg_{}", name), name.span());
                 let ty = arg.ty.clone();
-                let mut ty = quote! { #ty };
-                if arg.default.is_some() && !arg.optional {
-                    ty = quote! { Option<#ty> };
-                }
                 arg_def.push(quote! {
                     #[serde(rename = #rename)]
                     #field_name: #ty,
@@ -849,13 +845,35 @@ fn cli_handler(
                         ::rpc_toolkit::command_helpers::prelude::default_arg_parser(arg_val, matches)
                     }
                 };
-                if arg.optional || arg.default.is_some() {
+                if arg.optional {
                     quote! {
                         #field_name: if let Some(arg_val) = matches.value_of(#arg_name) {
                             Some(#parse_val?)
                         } else {
                             None
                         },
+                    }
+                } else if let Some(default) = &arg.default {
+                    if let Some(default) = default {
+                        let path: Path = match syn::parse_str(&default.value()) {
+                            Ok(a) => a,
+                            Err(e) => return e.into_compile_error(),
+                        };
+                        quote! {
+                            #field_name: if let Some(arg_val) = matches.value_of(#arg_name) {
+                                #parse_val?
+                            } else {
+                                #path()
+                            },
+                        }
+                    } else {
+                        quote! {
+                            #field_name: if let Some(arg_val) = matches.value_of(#arg_name) {
+                                #parse_val?
+                            } else {
+                                Default::default()
+                            },
+                        }
                     }
                 } else if arg.multiple.is_some() {
                     quote! {

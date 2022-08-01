@@ -42,6 +42,10 @@ impl Context for AppState {
     }
 }
 
+fn test_string() -> String {
+    "test".to_owned()
+}
+
 #[command(
     about = "Does the thing",
     subcommands("dothething2::<U, E>", self(dothething_impl(async)))
@@ -52,7 +56,7 @@ async fn dothething<
 >(
     #[context] _ctx: AppState,
     #[arg(short = 'a')] arg1: Option<String>,
-    #[arg(short = 'b')] val: String,
+    #[arg(short = 'b', default = "test_string")] val: String,
     #[arg(short = 'c', help = "I am the flag `c`!", default)] arg3: bool,
     #[arg(stdin)] structured: U,
 ) -> Result<(Option<String>, String, bool, U), RpcError> {
@@ -147,8 +151,8 @@ async fn test_rpc() {
         .arg("--exact")
         .arg("--nocapture")
         .arg("--")
-        .arg("-b")
-        .arg("test")
+        // .arg("-b")
+        // .arg("test")
         .arg("dothething2")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
