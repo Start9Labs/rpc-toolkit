@@ -13,5 +13,5 @@ proc-macro = true
 
 [dependencies]
 proc-macro2 = "1.0"
-rpc-toolkit-macro-internals = { version = "0.2", path = "../rpc-toolkit-macro-internals" }
+rpc-toolkit-macro-internals = { version = "0.2.1", path = "../rpc-toolkit-macro-internals" }
 syn = "1.0"
