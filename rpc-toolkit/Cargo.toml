@@ -2,7 +2,7 @@
 authors = ["Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
 name = "rpc-toolkit"
-version = "0.2.1"
+version = "0.2.2"
 description = "A toolkit for creating JSON-RPC 2.0 servers with automatic cli bindings"
 license = "MIT"
 documentation = "https://docs.rs/rpc-toolkit"
@@ -29,7 +29,7 @@ hyper = { version = "0.14", features = [
 lazy_static = "1.4"
 openssl = { version = "0.10", features = ["vendored"] }
 reqwest = { version = "0.11" }
-rpc-toolkit-macro = { version = "0.2.1", path = "../rpc-toolkit-macro" }
+rpc-toolkit-macro = { version = "=0.2.2", path = "../rpc-toolkit-macro" }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11", optional = true }
 serde_json = "1.0"

@@ -3,7 +3,7 @@ use syn::punctuated::Punctuated;
 
 use super::*;
 
-impl Parse for RpcServerArgs {
+impl Parse for RpcHandlerArgs {
     fn parse(input: ParseStream) -> Result<Self> {
         let args;
         braced!(args in input);
@@ -39,7 +39,7 @@ impl Parse for RpcServerArgs {
                 let _: token::Comma = args.parse()?;
             }
         }
-        Ok(RpcServerArgs {
+        Ok(RpcHandlerArgs {
             command: command.expect("`command` is required"),
             ctx: ctx.expect("`context` is required"),
             parent_data,

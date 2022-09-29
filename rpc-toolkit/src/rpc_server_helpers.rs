@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -108,6 +109,10 @@ pub fn to_response<F: Fn(i32) -> StatusCode>(
     };
     Ok(Response::from_parts(res_parts, body.into()))
 }
+
+pub type RpcHandler = Arc<
+    dyn Fn(Request<Body>) -> BoxFuture<'static, Result<Response<Body>, HttpError>> + Send + Sync,
+>;
 
 // &mut Request<Body> -> Result<Result<Future<&mut RpcRequest<...> -> Future<Result<Result<&mut Response<Body> -> Future<Result<(), HttpError>>, Response<Body>>, HttpError>>>, Response<Body>>, HttpError>
 pub type DynMiddleware<Metadata> = Box<

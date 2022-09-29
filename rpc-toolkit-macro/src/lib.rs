@@ -44,6 +44,12 @@ pub fn context(_: TokenStream, _: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
+pub fn rpc_handler(item: TokenStream) -> TokenStream {
+    let item = syn::parse_macro_input!(item as RpcHandlerArgs);
+    build_rpc_handler(item).into()
+}
+
+#[proc_macro]
 pub fn rpc_server(item: TokenStream) -> TokenStream {
     let item = syn::parse_macro_input!(item as RpcServerArgs);
     build_rpc_server(item).into()

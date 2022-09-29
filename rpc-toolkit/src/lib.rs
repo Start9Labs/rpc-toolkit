@@ -20,6 +20,13 @@
 ///
 /// See also: [arg](rpc_toolkit_macro::arg), [context](rpc_toolkit_macro::context)
 pub use rpc_toolkit_macro::command;
+/// `rpc_handler!(command, context, status_fn)`
+/// - returns: [RpcHandler](rpc_toolkit::RpcHandler)
+/// - `command`: path to an rpc command (with the `#[command]` attribute)
+/// - `context`: The [Context] for `command`. Must implement [Clone](std::clone::Clone).
+/// - `status_fn` (optional): a function that takes a JSON RPC error code (`i32`) and returns a [StatusCode](hyper::StatusCode)
+///   - default: `|_| StatusCode::OK`
+pub use rpc_toolkit_macro::rpc_handler;
 /// `rpc_server!(command, context, status_fn)`
 /// - returns: [Server](hyper::Server)
 /// - `command`: path to an rpc command (with the `#[command]` attribute)
@@ -39,10 +46,11 @@ pub use rpc_toolkit_macro::rpc_server;
 /// - `exit_fn` (optional): a function that takes a JSON RPC error code (`i32`) and returns an Exit code (`i32`)
 ///   - default: `|code| code`
 pub use rpc_toolkit_macro::run_cli;
-pub use {clap, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
+pub use {clap, futures, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
 
 pub use crate::context::Context;
 pub use crate::metadata::Metadata;
+pub use crate::rpc_server_helpers::RpcHandler;
 
 pub mod command_helpers;
 mod context;

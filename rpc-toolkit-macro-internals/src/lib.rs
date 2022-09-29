@@ -8,10 +8,13 @@ macro_rules! macro_try {
 }
 
 mod command;
+mod rpc_handler;
 mod rpc_server;
 mod run_cli;
 
 pub use command::build::build as build_command;
+pub use rpc_handler::build::build as build_rpc_handler;
+pub use rpc_handler::RpcHandlerArgs;
 pub use rpc_server::build::build as build_rpc_server;
 pub use rpc_server::RpcServerArgs;
 pub use run_cli::build::build as build_run_cli;
