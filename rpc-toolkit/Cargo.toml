@@ -2,7 +2,7 @@
 authors = ["Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
 name = "rpc-toolkit"
-version = "0.2.2"
+version = "0.2.3"
 description = "A toolkit for creating JSON-RPC 2.0 servers with automatic cli bindings"
 license = "MIT"
 documentation = "https://docs.rs/rpc-toolkit"
@@ -36,4 +36,4 @@ serde_json = "1.0"
 thiserror = "1.0"
 tokio = { version = "1", features = ["full"] }
 url = "2.2.2"
-yajrc = { version = "0.1", path = "../yajrc" }
+yajrc = "0.1.1"
