@@ -10,17 +10,22 @@ use serde::ser::Serialize;
 use tokio::runtime::Runtime;
 use yajrc::RpcError;
 
+use crate::util::{combine, extract, Flat};
+
+/// Stores a command's implementation for a given context
+/// Can be created from anything that implements ParentCommand, AsyncCommand, or SyncCommand
 pub struct DynCommand<Context> {
-    name: &'static str,
-    implementation: Option<Implementation<Context>>,
-    cli: Option<CliBindings>,
-    subcommands: Vec<Self>,
+    pub(crate) name: &'static str,
+    pub(crate) implementation: Option<Implementation<Context>>,
+    pub(crate) cli: Option<CliBindings>,
+    pub(crate) subcommands: Vec<Self>,
 }
 impl<Context> DynCommand<Context> {
-    fn cli_app(&self) -> Option<clap::Command> {
+    pub(crate) fn cli_app(&self) -> Option<clap::Command> {
         if let Some(cli) = &self.cli {
             Some(
                 cli.cmd
+                    .clone()
                     .name(self.name)
                     .subcommands(self.subcommands.iter().filter_map(|c| c.cli_app())),
             )
@@ -28,7 +33,7 @@ impl<Context> DynCommand<Context> {
             None
         }
     }
-    fn impl_from_cli_matches(
+    pub(crate) fn impl_from_cli_matches(
         &self,
         matches: &ArgMatches,
         parent: Value,
@@ -53,12 +58,13 @@ impl<Context> DynCommand<Context> {
             Err(yajrc::METHOD_NOT_FOUND_ERROR)
         }
     }
-    pub fn run_cli(ctx: Context) {}
 }
 
 struct Implementation<Context> {
-    async_impl: Arc<dyn Fn(Context, Value) -> BoxFuture<'static, Result<Value, RpcError>>>,
-    sync_impl: Arc<dyn Fn(Context, Value) -> Result<Value, RpcError>>,
+    pub(crate) async_impl: Arc<
+        dyn Fn(Context, Vec<&'static str>, Value) -> BoxFuture<'static, Result<Value, RpcError>>,
+    >,
+    pub(crate) sync_impl: Arc<dyn Fn(Context, Vec<&'static str>, Value) -> Result<Value, RpcError>>,
 }
 impl<Context> Clone for Implementation<Context> {
     fn clone(&self) -> Self {
@@ -72,7 +78,7 @@ impl<Context> Clone for Implementation<Context> {
 struct CliBindings {
     cmd: clap::Command,
     parser: Box<dyn for<'a> Fn(&'a ArgMatches) -> Result<Value, RpcError> + Send + Sync>,
-    display: Option<Box<dyn Fn(Value) + Send + Sync>>,
+    display: Option<Box<dyn Fn(Value) -> Result<(), imbl_value::Error> + Send + Sync>>,
 }
 impl CliBindings {
     fn from_parent<Cmd: FromArgMatches + CommandFactory + Serialize>() -> Self {
@@ -93,36 +99,50 @@ impl CliBindings {
     }
     fn from_leaf<Cmd: FromArgMatches + CommandFactory + Serialize + LeafCommand>() -> Self {
         Self {
-            display: Some(Box::new(|res| Cmd::display(todo!("{}", res)))),
+            display: Some(Box::new(|res| {
+                Ok(Cmd::display(imbl_value::from_value(res)?))
+            })),
             ..Self::from_parent::<Cmd>()
         }
     }
 }
 
-pub trait Command: DeserializeOwned + Sized {
+/// Must be implemented for all commands
+/// Use `Parent = NoParent` if the implementation requires no arguments from the parent command
+pub trait Command: DeserializeOwned + Sized + Send {
     const NAME: &'static str;
     type Parent: Command;
 }
 
+/// Includes the parent method, and the arguments requested from the parent
+/// Arguments are flattened out in the params object, so ensure that there are no collisions between the names of the arguments for your method and its parents
+pub struct ParentInfo<T> {
+    pub method: Vec<&'static str>,
+    pub args: T,
+}
+
+/// This is automatically generated from a command based on its Parents.
+/// It can be used to generate a proof that one of the parents contains the necessary arguments that a subcommand requires.
 pub struct ParentChain<Cmd: Command>(PhantomData<Cmd>);
 pub struct Contains<T>(PhantomData<T>);
-impl<T, U> From<(Contains<T>, Contains<U>)> for Contains<(T, U)> {
-    fn from(value: (Contains<T>, Contains<U>)) -> Self {
+impl<T, U> From<(Contains<T>, Contains<U>)> for Contains<Flat<T, U>> {
+    fn from(_: (Contains<T>, Contains<U>)) -> Self {
         Self(PhantomData)
     }
 }
 
+/// Use this as a Parent if your command does not require any arguments from its parents
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct Root {}
-impl Command for Root {
+pub struct NoParent {}
+impl Command for NoParent {
     const NAME: &'static str = "";
-    type Parent = Root;
+    type Parent = NoParent;
 }
 impl<Cmd> ParentChain<Cmd>
 where
     Cmd: Command,
 {
-    pub fn unit(&self) -> Contains<()> {
+    pub fn none(&self) -> Contains<NoParent> {
         Contains(PhantomData)
     }
     pub fn child(&self) -> Contains<Cmd> {
@@ -133,6 +153,7 @@ where
     }
 }
 
+/// Implement this for a command that has no implementation, but simply exists to organize subcommands
 pub trait ParentCommand<Context>: Command {
     fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>>;
 }
@@ -147,34 +168,52 @@ impl<Context> DynCommand<Context> {
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
         }
     }
+    pub fn from_parent_no_cli<Cmd: ParentCommand<Context>>() -> Self {
+        Self {
+            name: Cmd::NAME,
+            implementation: None,
+            cli: None,
+            subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
+        }
+    }
 }
 
+/// Implement this for any command with an implementation
 pub trait LeafCommand: Command {
-    type Ok: Serialize;
-    type Err: Into<RpcError>;
+    type Ok: DeserializeOwned + Serialize + Send;
+    type Err: From<RpcError> + Into<RpcError> + Send;
     fn display(res: Self::Ok);
 }
 
+/// Implement this if your Command's implementation is async
 #[async_trait::async_trait]
 pub trait AsyncCommand<Context>: LeafCommand {
     async fn implementation(
         self,
         ctx: Context,
-        parent: Self::Parent,
+        parent: ParentInfo<Self::Parent>,
     ) -> Result<Self::Ok, Self::Err>;
     fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
+        drop(chain);
         Vec::new()
     }
 }
-impl<Context: Send> Implementation<Context> {
+impl<Context: Send + 'static> Implementation<Context> {
     fn for_async<Cmd: AsyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
+        drop(contains);
         Self {
-            async_impl: Arc::new(|ctx, params| {
+            async_impl: Arc::new(|ctx, method, params| {
                 async move {
                     let parent = extract::<Cmd::Parent>(&params)?;
                     imbl_value::to_value(
                         &extract::<Cmd>(&params)?
-                            .implementation(ctx, parent)
+                            .implementation(
+                                ctx,
+                                ParentInfo {
+                                    method,
+                                    args: parent,
+                                },
+                            )
                             .await
                             .map_err(|e| e.into())?,
                     )
@@ -185,7 +224,7 @@ impl<Context: Send> Implementation<Context> {
                 }
                 .boxed()
             }),
-            sync_impl: Arc::new(|ctx, params| {
+            sync_impl: Arc::new(|ctx, method, params| {
                 let parent = extract::<Cmd::Parent>(&params)?;
                 imbl_value::to_value(
                     &Runtime::new()
@@ -196,7 +235,13 @@ impl<Context: Send> Implementation<Context> {
                                     data: Some(e.to_string().into()),
                                     ..yajrc::INVALID_PARAMS_ERROR
                                 })?
-                                .implementation(ctx, parent),
+                                .implementation(
+                                    ctx,
+                                    ParentInfo {
+                                        method,
+                                        args: parent,
+                                    },
+                                ),
                         )
                         .map_err(|e| e.into())?,
                 )
@@ -208,7 +253,7 @@ impl<Context: Send> Implementation<Context> {
         }
     }
 }
-impl<Context: Send> DynCommand<Context> {
+impl<Context: Send + 'static> DynCommand<Context> {
     pub fn from_async<Cmd: AsyncCommand<Context> + FromArgMatches + CommandFactory + Serialize>(
         contains: Contains<Cmd::Parent>,
     ) -> Self {
@@ -219,20 +264,35 @@ impl<Context: Send> DynCommand<Context> {
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
         }
     }
+    pub fn from_async_no_cli<Cmd: AsyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
+        Self {
+            name: Cmd::NAME,
+            implementation: Some(Implementation::for_async::<Cmd>(contains)),
+            cli: None,
+            subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
+        }
+    }
 }
 
+/// Implement this if your Command's implementation is not async
 pub trait SyncCommand<Context>: LeafCommand {
     const BLOCKING: bool;
-    fn implementation(self, ctx: Context, parent: Self::Parent) -> Result<Self::Ok, Self::Err>;
+    fn implementation(
+        self,
+        ctx: Context,
+        parent: ParentInfo<Self::Parent>,
+    ) -> Result<Self::Ok, Self::Err>;
     fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
+        drop(chain);
         Vec::new()
     }
 }
-impl<Context: Send> Implementation<Context> {
+impl<Context: Send + 'static> Implementation<Context> {
     fn for_sync<Cmd: SyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
+        drop(contains);
         Self {
             async_impl: if Cmd::BLOCKING {
-                Arc::new(|ctx, params| {
+                Arc::new(|ctx, method, params| {
                     tokio::task::spawn_blocking(move || {
                         let parent = extract::<Cmd::Parent>(&params)?;
                         imbl_value::to_value(
@@ -241,7 +301,13 @@ impl<Context: Send> Implementation<Context> {
                                     data: Some(e.to_string().into()),
                                     ..yajrc::INVALID_PARAMS_ERROR
                                 })?
-                                .implementation(ctx, parent)
+                                .implementation(
+                                    ctx,
+                                    ParentInfo {
+                                        method,
+                                        args: parent,
+                                    },
+                                )
                                 .map_err(|e| e.into())?,
                         )
                         .map_err(|e| RpcError {
@@ -258,7 +324,7 @@ impl<Context: Send> Implementation<Context> {
                     .boxed()
                 })
             } else {
-                Arc::new(|ctx, params| {
+                Arc::new(|ctx, method, params| {
                     async move {
                         let parent = extract::<Cmd::Parent>(&params)?;
                         imbl_value::to_value(
@@ -267,7 +333,13 @@ impl<Context: Send> Implementation<Context> {
                                     data: Some(e.to_string().into()),
                                     ..yajrc::INVALID_PARAMS_ERROR
                                 })?
-                                .implementation(ctx, parent)
+                                .implementation(
+                                    ctx,
+                                    ParentInfo {
+                                        method,
+                                        args: parent,
+                                    },
+                                )
                                 .map_err(|e| e.into())?,
                         )
                         .map_err(|e| RpcError {
@@ -278,7 +350,7 @@ impl<Context: Send> Implementation<Context> {
                     .boxed()
                 })
             },
-            sync_impl: Arc::new(|ctx, params| {
+            sync_impl: Arc::new(|ctx, method, params| {
                 let parent = extract::<Cmd::Parent>(&params)?;
                 imbl_value::to_value(
                     &extract::<Cmd>(&params)
@@ -286,7 +358,13 @@ impl<Context: Send> Implementation<Context> {
                             data: Some(e.to_string().into()),
                             ..yajrc::INVALID_PARAMS_ERROR
                         })?
-                        .implementation(ctx, parent)
+                        .implementation(
+                            ctx,
+                            ParentInfo {
+                                method,
+                                args: parent,
+                            },
+                        )
                         .map_err(|e| e.into())?,
                 )
                 .map_err(|e| RpcError {
@@ -297,7 +375,7 @@ impl<Context: Send> Implementation<Context> {
         }
     }
 }
-impl<Context: Send> DynCommand<Context> {
+impl<Context: Send + 'static> DynCommand<Context> {
     pub fn from_sync<Cmd: SyncCommand<Context> + FromArgMatches + CommandFactory + Serialize>(
         contains: Contains<Cmd::Parent>,
     ) -> Self {
@@ -308,29 +386,12 @@ impl<Context: Send> DynCommand<Context> {
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
         }
     }
-}
-
-fn extract<T: DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
-    imbl_value::from_value(value.clone()).map_err(|e| RpcError {
-        data: Some(e.to_string().into()),
-        ..yajrc::INVALID_PARAMS_ERROR
-    })
-}
-
-fn combine(v1: Value, v2: Value) -> Result<Value, RpcError> {
-    let (Value::Object(mut v1), Value::Object(v2)) = (v1, v2) else {
-        return Err(RpcError {
-            data: Some("params must be object".into()),
-            ..yajrc::INVALID_PARAMS_ERROR
-        });
-    };
-    for (key, value) in v2 {
-        if v1.insert(key.clone(), value).is_some() {
-            return Err(RpcError {
-                data: Some(format!("duplicate key: {key}").into()),
-                ..yajrc::INVALID_PARAMS_ERROR
-            });
+    pub fn from_sync_no_cli<Cmd: SyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
+        Self {
+            name: Cmd::NAME,
+            implementation: Some(Implementation::for_sync::<Cmd>(contains)),
+            cli: None,
+            subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
         }
     }
-    Ok(Value::Object(v1))
 }

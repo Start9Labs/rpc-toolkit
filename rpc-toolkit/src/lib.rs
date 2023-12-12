@@ -1,3 +1,5 @@
+pub use cli::*;
+pub use command::*;
 /// `#[command(...)]`
 /// - `#[command(cli_only)]` -> executed by CLI instead of RPC server (leaf commands only)
 /// - `#[command(rpc_only)]` -> no CLI bindings (leaf commands only)
@@ -20,40 +22,12 @@
 ///
 /// See also: [arg](rpc_toolkit_macro::arg), [context](rpc_toolkit_macro::context)
 pub use rpc_toolkit_macro::command;
-/// `rpc_handler!(command, context, status_fn)`
-/// - returns: [RpcHandler](rpc_toolkit::RpcHandler)
-/// - `command`: path to an rpc command (with the `#[command]` attribute)
-/// - `context`: The [Context] for `command`. Must implement [Clone](std::clone::Clone).
-/// - `status_fn` (optional): a function that takes a JSON RPC error code (`i32`) and returns a [StatusCode](hyper::StatusCode)
-///   - default: `|_| StatusCode::OK`
-pub use rpc_toolkit_macro::rpc_handler;
-/// `rpc_server!(command, context, status_fn)`
-/// - returns: [Server](hyper::Server)
-/// - `command`: path to an rpc command (with the `#[command]` attribute)
-/// - `context`: The [Context] for `command`. Must implement [Clone](std::clone::Clone).
-/// - `status_fn` (optional): a function that takes a JSON RPC error code (`i32`) and returns a [StatusCode](hyper::StatusCode)
-///   - default: `|_| StatusCode::OK`
-pub use rpc_toolkit_macro::rpc_server;
-/// `run_cli!(command, app_mutator, make_ctx, exit_fn)`
-/// - this function does not return
-/// - `command`: path to an rpc command (with the `#[command]` attribute)
-/// - `app_mutator` (optional): an expression that returns a mutated app.
-///   - example: `app => app.arg(Arg::with_name("port").long("port"))`
-///   - default: `app => app`
-/// - `make_ctx` (optional): an expression that takes [&ArgMatches](clap::ArgMatches) and returns the [Context] used by `command`.
-///   - example: `matches => matches.value_of("port")`
-///   - default: `matches => matches`
-/// - `exit_fn` (optional): a function that takes a JSON RPC error code (`i32`) and returns an Exit code (`i32`)
-///   - default: `|code| code`
-pub use rpc_toolkit_macro::run_cli;
 pub use {clap, futures, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
 
-pub use crate::context::Context;
-pub use crate::metadata::Metadata;
-pub use crate::rpc_server_helpers::RpcHandler;
-
-mod command;
-pub mod command_helpers;
-mod context;
-mod metadata;
-pub mod rpc_server_helpers;
+pub(crate) mod cli;
+pub(crate) mod command;
+// pub mod command_helpers;
+// mod context;
+// mod metadata;
+// pub mod rpc_server_helpers;
+pub(crate) mod util;
