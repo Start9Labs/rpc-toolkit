@@ -1,4 +1,8 @@
-use clap::ArgMatches;
+use std::ffi::OsString;
+
+use clap::{ArgMatches, CommandFactory, FromArgMatches};
+use futures::future::BoxFuture;
+use futures::{Future, FutureExt};
 use imbl_value::Value;
 use reqwest::{Client, Method};
 use serde::de::DeserializeOwned;
@@ -8,11 +12,178 @@ use yajrc::{GenericRpcMethod, Id, RpcError, RpcRequest};
 
 use crate::command::{AsyncCommand, DynCommand, LeafCommand, ParentInfo};
 use crate::util::{combine, invalid_params, parse_error};
-use crate::ParentChain;
+use crate::{CliBindings, ParentChain};
 
-pub struct CliApp<Context> {
-    pub(crate) command: DynCommand<Context>,
-    pub(crate) make_ctx: Box<dyn FnOnce(&ArgMatches) -> Result<Context, RpcError>>,
+impl<Context> DynCommand<Context> {
+    fn cli_app(&self) -> Option<clap::Command> {
+        if let Some(cli) = &self.cli {
+            Some(
+                cli.cmd
+                    .clone()
+                    .name(self.name)
+                    .subcommands(self.subcommands.iter().filter_map(|c| c.cli_app())),
+            )
+        } else {
+            None
+        }
+    }
+    fn cmd_from_cli_matches(
+        &self,
+        matches: &ArgMatches,
+        parent: ParentInfo<Value>,
+    ) -> Result<(Vec<&'static str>, Value, &DynCommand<Context>), RpcError> {
+        let params = combine(
+            parent.params,
+            (self
+                .cli
+                .as_ref()
+                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+                .parser)(matches)?,
+        )?;
+        if let Some((cmd, matches)) = matches.subcommand() {
+            let mut method = parent.method;
+            method.push(self.name);
+            self.subcommands
+                .iter()
+                .find(|c| c.name == cmd)
+                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+                .cmd_from_cli_matches(matches, ParentInfo { method, params })
+        } else {
+            Ok((parent.method, params, self))
+        }
+    }
+}
+
+struct CliApp<Context> {
+    cli: CliBindings,
+    commands: Vec<DynCommand<Context>>,
+}
+impl<Context> CliApp<Context> {
+    pub fn new<Cmd: FromArgMatches + CommandFactory + Serialize>(
+        commands: Vec<DynCommand<Context>>,
+    ) -> Self {
+        Self {
+            cli: CliBindings::from_parent::<Cmd>(),
+            commands,
+        }
+    }
+    fn cmd_from_cli_matches(
+        &self,
+        matches: &ArgMatches,
+    ) -> Result<(Vec<&'static str>, Value, &DynCommand<Context>), RpcError> {
+        if let Some((cmd, matches)) = matches.subcommand() {
+            Ok(self
+                .commands
+                .iter()
+                .find(|c| c.name == cmd)
+                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+                .cmd_from_cli_matches(
+                    matches,
+                    ParentInfo {
+                        method: Vec::new(),
+                        params: Value::Object(Default::default()),
+                    },
+                )?)
+        } else {
+            Err(yajrc::METHOD_NOT_FOUND_ERROR)
+        }
+    }
+}
+
+pub struct CliAppAsync<Context> {
+    app: CliApp<Context>,
+    make_ctx: Box<dyn FnOnce(Value) -> BoxFuture<'static, Result<Context, RpcError>> + Send>,
+}
+impl<Context> CliAppAsync<Context> {
+    pub fn new<
+        Cmd: FromArgMatches + CommandFactory + Serialize + DeserializeOwned + Send,
+        F: FnOnce(Cmd) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<Context, RpcError>> + Send,
+    >(
+        make_ctx: F,
+        commands: Vec<DynCommand<Context>>,
+    ) -> Self {
+        Self {
+            app: CliApp::new::<Cmd>(commands),
+            make_ctx: Box::new(|args| {
+                async { make_ctx(imbl_value::from_value(args).map_err(parse_error)?).await }.boxed()
+            }),
+        }
+    }
+    pub async fn run(self, args: Vec<OsString>) -> Result<(), RpcError> {
+        let cmd = self
+            .app
+            .cli
+            .cmd
+            .clone()
+            .subcommands(self.app.commands.iter().filter_map(|c| c.cli_app()));
+        let matches = cmd.get_matches_from(args);
+        let make_ctx_args = (self.app.cli.parser)(&matches)?;
+        let ctx = (self.make_ctx)(make_ctx_args).await?;
+        let (parent_method, params, cmd) = self.app.cmd_from_cli_matches(&matches)?;
+        let display = &cmd
+            .cli
+            .as_ref()
+            .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+            .display;
+        let res = (cmd
+            .implementation
+            .as_ref()
+            .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+            .async_impl)(ctx, parent_method, params)
+        .await?;
+        if let Some(display) = display {
+            display(res).map_err(parse_error)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub struct CliAppSync<Context> {
+    app: CliApp<Context>,
+    make_ctx: Box<dyn FnOnce(Value) -> Result<Context, RpcError> + Send>,
+}
+impl<Context> CliAppSync<Context> {
+    pub fn new<
+        Cmd: FromArgMatches + CommandFactory + Serialize + DeserializeOwned + Send,
+        F: FnOnce(Cmd) -> Result<Context, RpcError> + Send + 'static,
+    >(
+        make_ctx: F,
+        commands: Vec<DynCommand<Context>>,
+    ) -> Self {
+        Self {
+            app: CliApp::new::<Cmd>(commands),
+            make_ctx: Box::new(|args| make_ctx(imbl_value::from_value(args).map_err(parse_error)?)),
+        }
+    }
+    pub async fn run(self, args: Vec<OsString>) -> Result<(), RpcError> {
+        let cmd = self
+            .app
+            .cli
+            .cmd
+            .clone()
+            .subcommands(self.app.commands.iter().filter_map(|c| c.cli_app()));
+        let matches = cmd.get_matches_from(args);
+        let make_ctx_args = (self.app.cli.parser)(&matches)?;
+        let ctx = (self.make_ctx)(make_ctx_args)?;
+        let (parent_method, params, cmd) = self.app.cmd_from_cli_matches(&matches)?;
+        let display = &cmd
+            .cli
+            .as_ref()
+            .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+            .display;
+        let res = (cmd
+            .implementation
+            .as_ref()
+            .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+            .sync_impl)(ctx, parent_method, params)?;
+        if let Some(display) = display {
+            display(res).map_err(parse_error)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -98,7 +269,7 @@ where
                 &method.join("."),
                 combine(
                     imbl_value::to_value(&self).map_err(invalid_params)?,
-                    imbl_value::to_value(&parent.args).map_err(invalid_params)?,
+                    imbl_value::to_value(&parent.params).map_err(invalid_params)?,
                 )?,
             )
             .await?,

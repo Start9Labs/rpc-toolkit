@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use clap::{ArgMatches, CommandFactory, FromArgMatches};
 use futures::future::BoxFuture;
@@ -7,10 +6,9 @@ use futures::FutureExt;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
-use tokio::runtime::Runtime;
 use yajrc::RpcError;
 
-use crate::util::{combine, extract, Flat};
+use crate::util::{extract, Flat};
 
 /// Stores a command's implementation for a given context
 /// Can be created from anything that implements ParentCommand, AsyncCommand, or SyncCommand
@@ -20,68 +18,21 @@ pub struct DynCommand<Context> {
     pub(crate) cli: Option<CliBindings>,
     pub(crate) subcommands: Vec<Self>,
 }
-impl<Context> DynCommand<Context> {
-    pub(crate) fn cli_app(&self) -> Option<clap::Command> {
-        if let Some(cli) = &self.cli {
-            Some(
-                cli.cmd
-                    .clone()
-                    .name(self.name)
-                    .subcommands(self.subcommands.iter().filter_map(|c| c.cli_app())),
-            )
-        } else {
-            None
-        }
-    }
-    pub(crate) fn impl_from_cli_matches(
-        &self,
-        matches: &ArgMatches,
-        parent: Value,
-    ) -> Result<Implementation<Context>, RpcError> {
-        let args = combine(
-            parent,
-            (self
-                .cli
-                .as_ref()
-                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-                .parser)(matches)?,
-        )?;
-        if let Some((cmd, matches)) = matches.subcommand() {
-            self.subcommands
-                .iter()
-                .find(|c| c.name == cmd)
-                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-                .impl_from_cli_matches(matches, args)
-        } else if let Some(implementation) = self.implementation.clone() {
-            Ok(implementation)
-        } else {
-            Err(yajrc::METHOD_NOT_FOUND_ERROR)
-        }
-    }
-}
 
-struct Implementation<Context> {
-    pub(crate) async_impl: Arc<
+pub(crate) struct Implementation<Context> {
+    pub(crate) async_impl: Box<
         dyn Fn(Context, Vec<&'static str>, Value) -> BoxFuture<'static, Result<Value, RpcError>>,
     >,
-    pub(crate) sync_impl: Arc<dyn Fn(Context, Vec<&'static str>, Value) -> Result<Value, RpcError>>,
-}
-impl<Context> Clone for Implementation<Context> {
-    fn clone(&self) -> Self {
-        Self {
-            async_impl: self.async_impl.clone(),
-            sync_impl: self.sync_impl.clone(),
-        }
-    }
+    pub(crate) sync_impl: Box<dyn Fn(Context, Vec<&'static str>, Value) -> Result<Value, RpcError>>,
 }
 
-struct CliBindings {
-    cmd: clap::Command,
-    parser: Box<dyn for<'a> Fn(&'a ArgMatches) -> Result<Value, RpcError> + Send + Sync>,
-    display: Option<Box<dyn Fn(Value) -> Result<(), imbl_value::Error> + Send + Sync>>,
+pub(crate) struct CliBindings {
+    pub(crate) cmd: clap::Command,
+    pub(crate) parser: Box<dyn for<'a> Fn(&'a ArgMatches) -> Result<Value, RpcError> + Send + Sync>,
+    pub(crate) display: Option<Box<dyn Fn(Value) -> Result<(), imbl_value::Error> + Send + Sync>>,
 }
 impl CliBindings {
-    fn from_parent<Cmd: FromArgMatches + CommandFactory + Serialize>() -> Self {
+    pub(crate) fn from_parent<Cmd: FromArgMatches + CommandFactory + Serialize>() -> Self {
         Self {
             cmd: Cmd::command(),
             parser: Box::new(|matches| {
@@ -118,13 +69,18 @@ pub trait Command: DeserializeOwned + Sized + Send {
 /// Arguments are flattened out in the params object, so ensure that there are no collisions between the names of the arguments for your method and its parents
 pub struct ParentInfo<T> {
     pub method: Vec<&'static str>,
-    pub args: T,
+    pub params: T,
 }
 
 /// This is automatically generated from a command based on its Parents.
 /// It can be used to generate a proof that one of the parents contains the necessary arguments that a subcommand requires.
 pub struct ParentChain<Cmd: Command>(PhantomData<Cmd>);
 pub struct Contains<T>(PhantomData<T>);
+impl Contains<NoParent> {
+    pub fn none() -> Self {
+        Self(PhantomData)
+    }
+}
 impl<T, U> From<(Contains<T>, Contains<U>)> for Contains<Flat<T, U>> {
     fn from(_: (Contains<T>, Contains<U>)) -> Self {
         Self(PhantomData)
@@ -142,9 +98,6 @@ impl<Cmd> ParentChain<Cmd>
 where
     Cmd: Command,
 {
-    pub fn none(&self) -> Contains<NoParent> {
-        Contains(PhantomData)
-    }
     pub fn child(&self) -> Contains<Cmd> {
         Contains(PhantomData)
     }
@@ -198,20 +151,20 @@ pub trait AsyncCommand<Context>: LeafCommand {
         Vec::new()
     }
 }
-impl<Context: Send + 'static> Implementation<Context> {
+impl<Context: crate::Context> Implementation<Context> {
     fn for_async<Cmd: AsyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
         drop(contains);
         Self {
-            async_impl: Arc::new(|ctx, method, params| {
+            async_impl: Box::new(|ctx, parent_method, params| {
                 async move {
-                    let parent = extract::<Cmd::Parent>(&params)?;
+                    let parent_params = extract::<Cmd::Parent>(&params)?;
                     imbl_value::to_value(
                         &extract::<Cmd>(&params)?
                             .implementation(
                                 ctx,
                                 ParentInfo {
-                                    method,
-                                    args: parent,
+                                    method: parent_method,
+                                    params: parent_params,
                                 },
                             )
                             .await
@@ -224,11 +177,10 @@ impl<Context: Send + 'static> Implementation<Context> {
                 }
                 .boxed()
             }),
-            sync_impl: Arc::new(|ctx, method, params| {
-                let parent = extract::<Cmd::Parent>(&params)?;
+            sync_impl: Box::new(|ctx, parent_method, params| {
+                let parent_params = extract::<Cmd::Parent>(&params)?;
                 imbl_value::to_value(
-                    &Runtime::new()
-                        .unwrap()
+                    &ctx.runtime()
                         .block_on(
                             extract::<Cmd>(&params)
                                 .map_err(|e| RpcError {
@@ -238,8 +190,8 @@ impl<Context: Send + 'static> Implementation<Context> {
                                 .implementation(
                                     ctx,
                                     ParentInfo {
-                                        method,
-                                        args: parent,
+                                        method: parent_method,
+                                        params: parent_params,
                                     },
                                 ),
                         )
@@ -253,7 +205,7 @@ impl<Context: Send + 'static> Implementation<Context> {
         }
     }
 }
-impl<Context: Send + 'static> DynCommand<Context> {
+impl<Context: crate::Context> DynCommand<Context> {
     pub fn from_async<Cmd: AsyncCommand<Context> + FromArgMatches + CommandFactory + Serialize>(
         contains: Contains<Cmd::Parent>,
     ) -> Self {
@@ -292,9 +244,9 @@ impl<Context: Send + 'static> Implementation<Context> {
         drop(contains);
         Self {
             async_impl: if Cmd::BLOCKING {
-                Arc::new(|ctx, method, params| {
+                Box::new(|ctx, parent_method, params| {
                     tokio::task::spawn_blocking(move || {
-                        let parent = extract::<Cmd::Parent>(&params)?;
+                        let parent_params = extract::<Cmd::Parent>(&params)?;
                         imbl_value::to_value(
                             &extract::<Cmd>(&params)
                                 .map_err(|e| RpcError {
@@ -304,8 +256,8 @@ impl<Context: Send + 'static> Implementation<Context> {
                                 .implementation(
                                     ctx,
                                     ParentInfo {
-                                        method,
-                                        args: parent,
+                                        method: parent_method,
+                                        params: parent_params,
                                     },
                                 )
                                 .map_err(|e| e.into())?,
@@ -324,9 +276,9 @@ impl<Context: Send + 'static> Implementation<Context> {
                     .boxed()
                 })
             } else {
-                Arc::new(|ctx, method, params| {
+                Box::new(|ctx, parent_method, params| {
                     async move {
-                        let parent = extract::<Cmd::Parent>(&params)?;
+                        let parent_params = extract::<Cmd::Parent>(&params)?;
                         imbl_value::to_value(
                             &extract::<Cmd>(&params)
                                 .map_err(|e| RpcError {
@@ -336,8 +288,8 @@ impl<Context: Send + 'static> Implementation<Context> {
                                 .implementation(
                                     ctx,
                                     ParentInfo {
-                                        method,
-                                        args: parent,
+                                        method: parent_method,
+                                        params: parent_params,
                                     },
                                 )
                                 .map_err(|e| e.into())?,
@@ -350,7 +302,7 @@ impl<Context: Send + 'static> Implementation<Context> {
                     .boxed()
                 })
             },
-            sync_impl: Arc::new(|ctx, method, params| {
+            sync_impl: Box::new(|ctx, method, params| {
                 let parent = extract::<Cmd::Parent>(&params)?;
                 imbl_value::to_value(
                     &extract::<Cmd>(&params)
@@ -362,7 +314,7 @@ impl<Context: Send + 'static> Implementation<Context> {
                             ctx,
                             ParentInfo {
                                 method,
-                                args: parent,
+                                params: parent,
                             },
                         )
                         .map_err(|e| e.into())?,
