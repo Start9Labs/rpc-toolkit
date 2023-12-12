@@ -16,24 +16,19 @@ cbor = ["serde_cbor"]
 default = ["cbor"]
 
 [dependencies]
-clap = "3"
+async-trait = "0.1"
+clap = "4"
 futures = "0.3"
-hyper = { version = "0.14", features = [
-    "server",
-    "http1",
-    "http2",
-    "tcp",
-    "stream",
-    "client",
-] }
+hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
+imbl-value = { git = "https://github.com/Start9Labs/imbl-value.git" }
 lazy_static = "1.4"
 openssl = { version = "0.10", features = ["vendored"] }
 reqwest = { version = "0.11" }
-rpc-toolkit-macro = { version = "=0.2.2", path = "../rpc-toolkit-macro" }
+rpc-toolkit-macro = { version = "0.2.2", path = "../rpc-toolkit-macro" }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11", optional = true }
 serde_json = "1.0"
 thiserror = "1.0"
 tokio = { version = "1", features = ["full"] }
-url = "2.2.2"
-yajrc = "0.1.1"
+url = "2"
+yajrc = "0.1"

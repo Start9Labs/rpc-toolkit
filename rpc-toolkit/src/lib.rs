@@ -52,6 +52,7 @@ pub use crate::context::Context;
 pub use crate::metadata::Metadata;
 pub use crate::rpc_server_helpers::RpcHandler;
 
+mod command;
 pub mod command_helpers;
 mod context;
 mod metadata;
