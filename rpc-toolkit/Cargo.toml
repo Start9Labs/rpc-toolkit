@@ -16,11 +16,12 @@ cbor = ["serde_cbor"]
 default = ["cbor"]
 
 [dependencies]
+async-stream = "0.3"
 async-trait = "0.1"
 clap = "4"
 futures = "0.3"
 hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
-imbl-value = { git = "https://github.com/Start9Labs/imbl-value.git" }
+imbl-value = "0.1"
 lazy_static = "1.4"
 openssl = { version = "0.10", features = ["vendored"] }
 reqwest = { version = "0.11" }

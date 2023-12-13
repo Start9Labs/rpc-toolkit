@@ -23,6 +23,7 @@ pub use context::Context;
 ///
 /// See also: [arg](rpc_toolkit_macro::arg), [context](rpc_toolkit_macro::context)
 pub use rpc_toolkit_macro::command;
+pub use server::*;
 pub use {clap, futures, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
 
 mod cli;
@@ -31,4 +32,5 @@ mod command;
 mod context;
 // mod metadata;
 // pub mod rpc_server_helpers;
+mod server;
 mod util;

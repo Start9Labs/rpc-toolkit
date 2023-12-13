@@ -14,7 +14,7 @@ use crate::command::{AsyncCommand, DynCommand, LeafCommand, ParentInfo};
 use crate::util::{combine, invalid_params, parse_error};
 use crate::{CliBindings, ParentChain};
 
-impl<Context> DynCommand<Context> {
+impl<Context: crate::Context> DynCommand<Context> {
     fn cli_app(&self) -> Option<clap::Command> {
         if let Some(cli) = &self.cli {
             Some(
@@ -54,11 +54,11 @@ impl<Context> DynCommand<Context> {
     }
 }
 
-struct CliApp<Context> {
+struct CliApp<Context: crate::Context> {
     cli: CliBindings,
     commands: Vec<DynCommand<Context>>,
 }
-impl<Context> CliApp<Context> {
+impl<Context: crate::Context> CliApp<Context> {
     pub fn new<Cmd: FromArgMatches + CommandFactory + Serialize>(
         commands: Vec<DynCommand<Context>>,
     ) -> Self {
@@ -90,11 +90,11 @@ impl<Context> CliApp<Context> {
     }
 }
 
-pub struct CliAppAsync<Context> {
+pub struct CliAppAsync<Context: crate::Context> {
     app: CliApp<Context>,
     make_ctx: Box<dyn FnOnce(Value) -> BoxFuture<'static, Result<Context, RpcError>> + Send>,
 }
-impl<Context> CliAppAsync<Context> {
+impl<Context: crate::Context> CliAppAsync<Context> {
     pub fn new<
         Cmd: FromArgMatches + CommandFactory + Serialize + DeserializeOwned + Send,
         F: FnOnce(Cmd) -> Fut + Send + 'static,
@@ -140,11 +140,11 @@ impl<Context> CliAppAsync<Context> {
     }
 }
 
-pub struct CliAppSync<Context> {
+pub struct CliAppSync<Context: crate::Context> {
     app: CliApp<Context>,
     make_ctx: Box<dyn FnOnce(Value) -> Result<Context, RpcError> + Send>,
 }
-impl<Context> CliAppSync<Context> {
+impl<Context: crate::Context> CliAppSync<Context> {
     pub fn new<
         Cmd: FromArgMatches + CommandFactory + Serialize + DeserializeOwned + Send,
         F: FnOnce(Cmd) -> Result<Context, RpcError> + Send + 'static,
@@ -187,11 +187,11 @@ impl<Context> CliAppSync<Context> {
 }
 
 #[async_trait::async_trait]
-pub trait CliContext {
+pub trait CliContext: crate::Context {
     async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError>;
 }
 
-pub trait CliContextHttp {
+pub trait CliContextHttp: crate::Context {
     fn client(&self) -> &Client;
     fn url(&self) -> Url;
 }
@@ -243,6 +243,7 @@ impl<T: CliContextHttp + Sync> CliContext for T {
 }
 
 pub trait RemoteCommand<Context: CliContext>: LeafCommand {
+    fn metadata() -> Context::Metadata;
     fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
         drop(chain);
         Vec::new()
@@ -257,6 +258,9 @@ where
     T::Err: From<RpcError>,
     Context: CliContext + Send + 'static,
 {
+    fn metadata() -> Context::Metadata {
+        T::metadata()
+    }
     async fn implementation(
         self,
         ctx: Context,
@@ -275,5 +279,8 @@ where
             .await?,
         )
         .map_err(parse_error)?)
+    }
+    fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
+        T::subcommands(chain)
     }
 }

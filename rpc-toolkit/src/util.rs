@@ -35,6 +35,13 @@ pub fn invalid_params(e: imbl_value::Error) -> RpcError {
     }
 }
 
+pub fn invalid_request(e: imbl_value::Error) -> RpcError {
+    RpcError {
+        data: Some(e.to_string().into()),
+        ..yajrc::INVALID_REQUEST_ERROR
+    }
+}
+
 pub fn parse_error(e: imbl_value::Error) -> RpcError {
     RpcError {
         data: Some(e.to_string().into()),

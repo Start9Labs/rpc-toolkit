@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use clap::{ArgMatches, CommandFactory, FromArgMatches};
 use futures::future::BoxFuture;
@@ -12,18 +13,22 @@ use crate::util::{extract, Flat};
 
 /// Stores a command's implementation for a given context
 /// Can be created from anything that implements ParentCommand, AsyncCommand, or SyncCommand
-pub struct DynCommand<Context> {
+pub struct DynCommand<Context: crate::Context> {
     pub(crate) name: &'static str,
+    pub(crate) metadata: Context::Metadata,
     pub(crate) implementation: Option<Implementation<Context>>,
     pub(crate) cli: Option<CliBindings>,
     pub(crate) subcommands: Vec<Self>,
 }
 
 pub(crate) struct Implementation<Context> {
-    pub(crate) async_impl: Box<
-        dyn Fn(Context, Vec<&'static str>, Value) -> BoxFuture<'static, Result<Value, RpcError>>,
+    pub(crate) async_impl: Arc<
+        dyn Fn(Context, Vec<&'static str>, Value) -> BoxFuture<'static, Result<Value, RpcError>>
+            + Send
+            + Sync,
     >,
-    pub(crate) sync_impl: Box<dyn Fn(Context, Vec<&'static str>, Value) -> Result<Value, RpcError>>,
+    pub(crate) sync_impl:
+        Box<dyn Fn(Context, Vec<&'static str>, Value) -> Result<Value, RpcError> + Send + Sync>,
 }
 
 pub(crate) struct CliBindings {
@@ -107,15 +112,17 @@ where
 }
 
 /// Implement this for a command that has no implementation, but simply exists to organize subcommands
-pub trait ParentCommand<Context>: Command {
+pub trait ParentCommand<Context: crate::Context>: Command {
+    fn metadata() -> Context::Metadata;
     fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>>;
 }
-impl<Context> DynCommand<Context> {
+impl<Context: crate::Context> DynCommand<Context> {
     pub fn from_parent<
         Cmd: ParentCommand<Context> + FromArgMatches + CommandFactory + Serialize,
     >() -> Self {
         Self {
             name: Cmd::NAME,
+            metadata: Cmd::metadata(),
             implementation: None,
             cli: Some(CliBindings::from_parent::<Cmd>()),
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
@@ -124,6 +131,7 @@ impl<Context> DynCommand<Context> {
     pub fn from_parent_no_cli<Cmd: ParentCommand<Context>>() -> Self {
         Self {
             name: Cmd::NAME,
+            metadata: Cmd::metadata(),
             implementation: None,
             cli: None,
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
@@ -140,7 +148,8 @@ pub trait LeafCommand: Command {
 
 /// Implement this if your Command's implementation is async
 #[async_trait::async_trait]
-pub trait AsyncCommand<Context>: LeafCommand {
+pub trait AsyncCommand<Context: crate::Context>: LeafCommand {
+    fn metadata() -> Context::Metadata;
     async fn implementation(
         self,
         ctx: Context,
@@ -155,7 +164,7 @@ impl<Context: crate::Context> Implementation<Context> {
     fn for_async<Cmd: AsyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
         drop(contains);
         Self {
-            async_impl: Box::new(|ctx, parent_method, params| {
+            async_impl: Arc::new(|ctx, parent_method, params| {
                 async move {
                     let parent_params = extract::<Cmd::Parent>(&params)?;
                     imbl_value::to_value(
@@ -211,6 +220,7 @@ impl<Context: crate::Context> DynCommand<Context> {
     ) -> Self {
         Self {
             name: Cmd::NAME,
+            metadata: Cmd::metadata(),
             implementation: Some(Implementation::for_async::<Cmd>(contains)),
             cli: Some(CliBindings::from_leaf::<Cmd>()),
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
@@ -219,6 +229,7 @@ impl<Context: crate::Context> DynCommand<Context> {
     pub fn from_async_no_cli<Cmd: AsyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
         Self {
             name: Cmd::NAME,
+            metadata: Cmd::metadata(),
             implementation: Some(Implementation::for_async::<Cmd>(contains)),
             cli: None,
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
@@ -227,8 +238,9 @@ impl<Context: crate::Context> DynCommand<Context> {
 }
 
 /// Implement this if your Command's implementation is not async
-pub trait SyncCommand<Context>: LeafCommand {
+pub trait SyncCommand<Context: crate::Context>: LeafCommand {
     const BLOCKING: bool;
+    fn metadata() -> Context::Metadata;
     fn implementation(
         self,
         ctx: Context,
@@ -239,12 +251,12 @@ pub trait SyncCommand<Context>: LeafCommand {
         Vec::new()
     }
 }
-impl<Context: Send + 'static> Implementation<Context> {
+impl<Context: crate::Context> Implementation<Context> {
     fn for_sync<Cmd: SyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
         drop(contains);
         Self {
             async_impl: if Cmd::BLOCKING {
-                Box::new(|ctx, parent_method, params| {
+                Arc::new(|ctx, parent_method, params| {
                     tokio::task::spawn_blocking(move || {
                         let parent_params = extract::<Cmd::Parent>(&params)?;
                         imbl_value::to_value(
@@ -276,7 +288,7 @@ impl<Context: Send + 'static> Implementation<Context> {
                     .boxed()
                 })
             } else {
-                Box::new(|ctx, parent_method, params| {
+                Arc::new(|ctx, parent_method, params| {
                     async move {
                         let parent_params = extract::<Cmd::Parent>(&params)?;
                         imbl_value::to_value(
@@ -327,12 +339,13 @@ impl<Context: Send + 'static> Implementation<Context> {
         }
     }
 }
-impl<Context: Send + 'static> DynCommand<Context> {
+impl<Context: crate::Context> DynCommand<Context> {
     pub fn from_sync<Cmd: SyncCommand<Context> + FromArgMatches + CommandFactory + Serialize>(
         contains: Contains<Cmd::Parent>,
     ) -> Self {
         Self {
             name: Cmd::NAME,
+            metadata: Cmd::metadata(),
             implementation: Some(Implementation::for_sync::<Cmd>(contains)),
             cli: Some(CliBindings::from_leaf::<Cmd>()),
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
@@ -341,6 +354,7 @@ impl<Context: Send + 'static> DynCommand<Context> {
     pub fn from_sync_no_cli<Cmd: SyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
         Self {
             name: Cmd::NAME,
+            metadata: Cmd::metadata(),
             implementation: Some(Implementation::for_sync::<Cmd>(contains)),
             cli: None,
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
