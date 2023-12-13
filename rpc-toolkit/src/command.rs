@@ -17,7 +17,7 @@ pub struct DynCommand<Context: crate::Context> {
     pub(crate) name: &'static str,
     pub(crate) metadata: Context::Metadata,
     pub(crate) implementation: Option<Implementation<Context>>,
-    pub(crate) cli: Option<CliBindings>,
+    pub(crate) cli: Option<CliBindings<Context>>,
     pub(crate) subcommands: Vec<Self>,
 }
 
@@ -31,12 +31,18 @@ pub(crate) struct Implementation<Context> {
         Box<dyn Fn(Context, Vec<&'static str>, Value) -> Result<Value, RpcError> + Send + Sync>,
 }
 
-pub(crate) struct CliBindings {
+pub(crate) struct CliBindings<Context> {
     pub(crate) cmd: clap::Command,
     pub(crate) parser: Box<dyn for<'a> Fn(&'a ArgMatches) -> Result<Value, RpcError> + Send + Sync>,
-    pub(crate) display: Option<Box<dyn Fn(Value) -> Result<(), imbl_value::Error> + Send + Sync>>,
+    pub(crate) display: Option<
+        Box<
+            dyn Fn(Context, Vec<&'static str>, Value, Value) -> Result<(), imbl_value::Error>
+                + Send
+                + Sync,
+        >,
+    >,
 }
-impl CliBindings {
+impl<Context: crate::Context> CliBindings<Context> {
     pub(crate) fn from_parent<Cmd: FromArgMatches + CommandFactory + Serialize>() -> Self {
         Self {
             cmd: Cmd::command(),
@@ -53,10 +59,19 @@ impl CliBindings {
             display: None,
         }
     }
-    fn from_leaf<Cmd: FromArgMatches + CommandFactory + Serialize + LeafCommand>() -> Self {
+    fn from_leaf<Cmd: FromArgMatches + CommandFactory + Serialize + LeafCommand<Context>>() -> Self
+    {
         Self {
-            display: Some(Box::new(|res| {
-                Ok(Cmd::display(imbl_value::from_value(res)?))
+            display: Some(Box::new(|ctx, parent_method, params, res| {
+                let parent_params = imbl_value::from_value(params.clone())?;
+                Ok(imbl_value::from_value::<Cmd>(params)?.display(
+                    ctx,
+                    ParentInfo {
+                        method: parent_method,
+                        params: parent_params,
+                    },
+                    imbl_value::from_value(res)?,
+                ))
             })),
             ..Self::from_parent::<Cmd>()
         }
@@ -113,13 +128,18 @@ where
 
 /// Implement this for a command that has no implementation, but simply exists to organize subcommands
 pub trait ParentCommand<Context: crate::Context>: Command {
-    fn metadata() -> Context::Metadata;
+    fn metadata() -> Context::Metadata {
+        Context::Metadata::default()
+    }
     fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>>;
 }
 impl<Context: crate::Context> DynCommand<Context> {
     pub fn from_parent<
         Cmd: ParentCommand<Context> + FromArgMatches + CommandFactory + Serialize,
-    >() -> Self {
+    >(
+        contains: Contains<Cmd::Parent>,
+    ) -> Self {
+        drop(contains);
         Self {
             name: Cmd::NAME,
             metadata: Cmd::metadata(),
@@ -128,7 +148,10 @@ impl<Context: crate::Context> DynCommand<Context> {
             subcommands: Cmd::subcommands(ParentChain::<Cmd>(PhantomData)),
         }
     }
-    pub fn from_parent_no_cli<Cmd: ParentCommand<Context>>() -> Self {
+    pub fn from_parent_no_cli<Cmd: ParentCommand<Context>>(
+        contains: Contains<Cmd::Parent>,
+    ) -> Self {
+        drop(contains);
         Self {
             name: Cmd::NAME,
             metadata: Cmd::metadata(),
@@ -140,25 +163,27 @@ impl<Context: crate::Context> DynCommand<Context> {
 }
 
 /// Implement this for any command with an implementation
-pub trait LeafCommand: Command {
+pub trait LeafCommand<Context: crate::Context>: Command {
     type Ok: DeserializeOwned + Serialize + Send;
     type Err: From<RpcError> + Into<RpcError> + Send;
-    fn display(res: Self::Ok);
+    fn metadata() -> Context::Metadata {
+        Context::Metadata::default()
+    }
+    fn display(self, ctx: Context, parent: ParentInfo<Self::Parent>, res: Self::Ok);
+    fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
+        drop(chain);
+        Vec::new()
+    }
 }
 
 /// Implement this if your Command's implementation is async
 #[async_trait::async_trait]
-pub trait AsyncCommand<Context: crate::Context>: LeafCommand {
-    fn metadata() -> Context::Metadata;
+pub trait AsyncCommand<Context: crate::Context>: LeafCommand<Context> {
     async fn implementation(
         self,
         ctx: Context,
         parent: ParentInfo<Self::Parent>,
     ) -> Result<Self::Ok, Self::Err>;
-    fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
-        drop(chain);
-        Vec::new()
-    }
 }
 impl<Context: crate::Context> Implementation<Context> {
     fn for_async<Cmd: AsyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {
@@ -238,18 +263,13 @@ impl<Context: crate::Context> DynCommand<Context> {
 }
 
 /// Implement this if your Command's implementation is not async
-pub trait SyncCommand<Context: crate::Context>: LeafCommand {
+pub trait SyncCommand<Context: crate::Context>: LeafCommand<Context> {
     const BLOCKING: bool;
-    fn metadata() -> Context::Metadata;
     fn implementation(
         self,
         ctx: Context,
         parent: ParentInfo<Self::Parent>,
     ) -> Result<Self::Ok, Self::Err>;
-    fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
-        drop(chain);
-        Vec::new()
-    }
 }
 impl<Context: crate::Context> Implementation<Context> {
     fn for_sync<Cmd: SyncCommand<Context>>(contains: Contains<Cmd::Parent>) -> Self {

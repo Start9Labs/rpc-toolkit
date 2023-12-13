@@ -7,12 +7,17 @@ use imbl_value::Value;
 use reqwest::{Client, Method};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use url::Url;
-use yajrc::{GenericRpcMethod, Id, RpcError, RpcRequest};
+use yajrc::{Id, RpcError};
 
 use crate::command::{AsyncCommand, DynCommand, LeafCommand, ParentInfo};
-use crate::util::{combine, invalid_params, parse_error};
-use crate::{CliBindings, ParentChain};
+use crate::util::{combine, internal_error, invalid_params, parse_error};
+use crate::{CliBindings, SyncCommand};
+
+type GenericRpcMethod<'a> = yajrc::GenericRpcMethod<&'a str, Value, Value>;
+type RpcRequest<'a> = yajrc::RpcRequest<GenericRpcMethod<'a>>;
+type RpcResponse<'a> = yajrc::RpcResponse<GenericRpcMethod<'static>>;
 
 impl<Context: crate::Context> DynCommand<Context> {
     fn cli_app(&self) -> Option<clap::Command> {
@@ -55,7 +60,7 @@ impl<Context: crate::Context> DynCommand<Context> {
 }
 
 struct CliApp<Context: crate::Context> {
-    cli: CliBindings,
+    cli: CliBindings<Context>,
     commands: Vec<DynCommand<Context>>,
 }
 impl<Context: crate::Context> CliApp<Context> {
@@ -110,6 +115,8 @@ impl<Context: crate::Context> CliAppAsync<Context> {
             }),
         }
     }
+}
+impl<Context: crate::Context + Clone> CliAppAsync<Context> {
     pub async fn run(self, args: Vec<OsString>) -> Result<(), RpcError> {
         let cmd = self
             .app
@@ -130,10 +137,10 @@ impl<Context: crate::Context> CliAppAsync<Context> {
             .implementation
             .as_ref()
             .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-            .async_impl)(ctx, parent_method, params)
+            .async_impl)(ctx.clone(), parent_method.clone(), params.clone())
         .await?;
         if let Some(display) = display {
-            display(res).map_err(parse_error)
+            display(ctx, parent_method, params, res).map_err(parse_error)
         } else {
             Ok(())
         }
@@ -157,6 +164,8 @@ impl<Context: crate::Context> CliAppSync<Context> {
             make_ctx: Box::new(|args| make_ctx(imbl_value::from_value(args).map_err(parse_error)?)),
         }
     }
+}
+impl<Context: crate::Context + Clone> CliAppSync<Context> {
     pub async fn run(self, args: Vec<OsString>) -> Result<(), RpcError> {
         let cmd = self
             .app
@@ -177,9 +186,9 @@ impl<Context: crate::Context> CliAppSync<Context> {
             .implementation
             .as_ref()
             .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-            .sync_impl)(ctx, parent_method, params)?;
+            .sync_impl)(ctx.clone(), parent_method.clone(), params.clone())?;
         if let Some(display) = display {
-            display(res).map_err(parse_error)
+            display(ctx, parent_method, params, res).map_err(parse_error)
         } else {
             Ok(())
         }
@@ -191,14 +200,12 @@ pub trait CliContext: crate::Context {
     async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError>;
 }
 
+#[async_trait::async_trait]
 pub trait CliContextHttp: crate::Context {
     fn client(&self) -> &Client;
     fn url(&self) -> Url;
-}
-#[async_trait::async_trait]
-impl<T: CliContextHttp + Sync> CliContext for T {
     async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
-        let rpc_req: RpcRequest<GenericRpcMethod<&str, Value, Value>> = RpcRequest {
+        let rpc_req = RpcRequest {
             id: Some(Id::Number(0.into())),
             method: GenericRpcMethod::new(method),
             params,
@@ -222,33 +229,61 @@ impl<T: CliContextHttp + Sync> CliContext for T {
             .body(body)
             .send()
             .await?;
-        Ok(
-            match res
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-            {
-                Some("application/json") => serde_json::from_slice(&*res.bytes().await?)?,
-                #[cfg(feature = "cbor")]
-                Some("application/cbor") => serde_cbor::from_slice(&*res.bytes().await?)?,
-                _ => {
-                    return Err(RpcError {
-                        data: Some("missing content type".into()),
-                        ..yajrc::INTERNAL_ERROR
-                    })
-                }
-            },
-        )
+
+        match res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+        {
+            Some("application/json") => {
+                serde_json::from_slice::<RpcResponse>(&*res.bytes().await.map_err(internal_error)?)
+                    .map_err(parse_error)?
+                    .result
+            }
+            #[cfg(feature = "cbor")]
+            Some("application/cbor") => {
+                serde_cbor::from_slice::<RpcResponse>(&*res.bytes().await.map_err(internal_error)?)
+                    .map_err(parse_error)?
+                    .result
+            }
+            _ => Err(internal_error("missing content type")),
+        }
     }
 }
 
-pub trait RemoteCommand<Context: CliContext>: LeafCommand {
-    fn metadata() -> Context::Metadata;
-    fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
-        drop(chain);
-        Vec::new()
+#[async_trait::async_trait]
+pub trait CliContextSocket: crate::Context {
+    type Stream: AsyncRead + AsyncWrite + Send;
+    async fn connect(&self) -> std::io::Result<Self::Stream>;
+    async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+        let rpc_req = RpcRequest {
+            id: Some(Id::Number(0.into())),
+            method: GenericRpcMethod::new(method),
+            params,
+        };
+        let conn = self.connect().await.map_err(|e| RpcError {
+            data: Some(e.to_string().into()),
+            ..yajrc::INTERNAL_ERROR
+        })?;
+        tokio::pin!(conn);
+        let mut buf = serde_json::to_vec(&rpc_req).map_err(|e| RpcError {
+            data: Some(e.to_string().into()),
+            ..yajrc::INTERNAL_ERROR
+        })?;
+        buf.push(b'\n');
+        conn.write_all(&buf).await.map_err(|e| RpcError {
+            data: Some(e.to_string().into()),
+            ..yajrc::INTERNAL_ERROR
+        })?;
+        let mut line = String::new();
+        BufReader::new(conn).read_line(&mut line).await?;
+        serde_json::from_str::<RpcResponse>(&line)
+            .map_err(parse_error)?
+            .result
     }
 }
+
+pub trait RemoteCommand<Context: CliContext>: LeafCommand<Context> {}
 #[async_trait::async_trait]
 impl<T, Context> AsyncCommand<Context> for T
 where
@@ -258,9 +293,6 @@ where
     T::Err: From<RpcError>,
     Context: CliContext + Send + 'static,
 {
-    fn metadata() -> Context::Metadata {
-        T::metadata()
-    }
     async fn implementation(
         self,
         ctx: Context,
@@ -280,7 +312,33 @@ where
         )
         .map_err(parse_error)?)
     }
-    fn subcommands(chain: ParentChain<Self>) -> Vec<DynCommand<Context>> {
-        T::subcommands(chain)
+}
+
+impl<T, Context> SyncCommand<Context> for T
+where
+    T: RemoteCommand<Context> + Send + Serialize,
+    T::Parent: Serialize,
+    T::Ok: DeserializeOwned,
+    T::Err: From<RpcError>,
+    Context: CliContext + Send + 'static,
+{
+    const BLOCKING: bool = true;
+    fn implementation(
+        self,
+        ctx: Context,
+        parent: ParentInfo<Self::Parent>,
+    ) -> Result<Self::Ok, Self::Err> {
+        let mut method = parent.method;
+        method.push(Self::NAME);
+        Ok(
+            imbl_value::from_value(ctx.runtime().block_on(ctx.call_remote(
+                &method.join("."),
+                combine(
+                    imbl_value::to_value(&self).map_err(invalid_params)?,
+                    imbl_value::to_value(&parent.params).map_err(invalid_params)?,
+                )?,
+            ))?)
+            .map_err(parse_error)?,
+        )
     }
 }

@@ -1,15 +1,18 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use futures::future::{join_all, BoxFuture};
-use futures::stream::{BoxStream, Fuse};
-use futures::{Future, FutureExt, Stream, StreamExt, TryStreamExt};
+use futures::{Future, FutureExt, Stream, StreamExt};
 use imbl_value::Value;
-use tokio::runtime::Handle;
-use tokio::task::JoinHandle;
-use yajrc::{AnyParams, RpcError, RpcMethod, RpcRequest, RpcResponse, SingleOrBatchRpcRequest};
+use yajrc::{AnyParams, AnyRpcMethod, RpcError, RpcMethod};
 
-use crate::util::{invalid_request, parse_error};
+use crate::util::{invalid_request, JobRunner};
 use crate::DynCommand;
+
+type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
+type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
+type RpcResponse = yajrc::RpcResponse<GenericRpcMethod>;
+type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMethod>;
 
 mod http;
 mod socket;
@@ -91,134 +94,58 @@ impl<Context: crate::Context> Server<Context> {
         &self,
         RpcRequest { id, method, params }: RpcRequest,
     ) -> impl Future<Output = RpcResponse> + Send + 'static {
-        let handle = (|| {
-            Ok::<_, RpcError>(self.handle_command(
-                method.as_str(),
-                match params {
-                    AnyParams::Named(a) => serde_json::Value::Object(a).into(),
-                    _ => {
-                        return Err(RpcError {
-                            data: Some("positional parameters unsupported".into()),
-                            ..yajrc::INVALID_PARAMS_ERROR
-                        })
-                    }
-                },
-            ))
-        })();
+        let handle = (|| Ok::<_, RpcError>(self.handle_command(method.as_str(), params)))();
         async move {
             RpcResponse {
                 id,
                 result: match handle {
-                    Ok(handle) => handle.await.map(serde_json::Value::from),
+                    Ok(handle) => handle.await,
                     Err(e) => Err(e),
                 },
             }
         }
     }
 
-    pub fn handle(&self, request: Value) -> BoxFuture<'static, Result<Value, RpcError>> {
-        let request =
-            imbl_value::from_value::<SingleOrBatchRpcRequest>(request).map_err(invalid_request);
-        match request {
+    pub fn handle(
+        &self,
+        request: Result<Value, RpcError>,
+    ) -> BoxFuture<'static, Result<Value, imbl_value::Error>> {
+        match request.and_then(|request| {
+            imbl_value::from_value::<SingleOrBatchRpcRequest>(request).map_err(invalid_request)
+        }) {
             Ok(SingleOrBatchRpcRequest::Single(req)) => {
                 let fut = self.handle_single_request(req);
-                async { imbl_value::to_value(&fut.await).map_err(parse_error) }.boxed()
+                async { imbl_value::to_value(&fut.await) }.boxed()
             }
             Ok(SingleOrBatchRpcRequest::Batch(reqs)) => {
                 let futs: Vec<_> = reqs
                     .into_iter()
                     .map(|req| self.handle_single_request(req))
                     .collect();
-                async { imbl_value::to_value(&join_all(futs).await).map_err(parse_error) }.boxed()
+                async { imbl_value::to_value(&join_all(futs).await) }.boxed()
             }
-            Err(e) => async { Err(e) }.boxed(),
+            Err(e) => async {
+                imbl_value::to_value(&RpcResponse {
+                    id: None,
+                    result: Err(e),
+                })
+            }
+            .boxed(),
         }
     }
 
     pub fn stream<'a>(
         &'a self,
         requests: impl Stream<Item = Result<Value, RpcError>> + Send + 'a,
-    ) -> impl Stream<Item = Result<Value, RpcError>> + 'a {
-        let mut running = RunningCommands::default();
-        let mut requests = requests.boxed().fuse();
-        async fn next<'a, Context: crate::Context>(
-            server: &'a Server<Context>,
-            running: &mut RunningCommands,
-            requests: &mut Fuse<BoxStream<'a, Result<Value, RpcError>>>,
-        ) -> Result<Option<Value>, RpcError> {
-            loop {
-                tokio::select! {
-                    req = requests.try_next() => {
-                        let req = req?;
-                        if let Some(req) = req {
-                            running.running.push(tokio::spawn(server.handle(req)));
-                        } else {
-                            running.closed = true;
-                        }
-                    }
-                    res = running.try_next() => {
-                        return res;
-                    }
-                }
-            }
-        }
+    ) -> impl Stream<Item = Result<Value, imbl_value::Error>> + 'a {
         async_stream::try_stream! {
-            while let Some(res) = next(self, &mut running, &mut requests).await? {
+            let mut runner = JobRunner::new();
+            let requests = requests.fuse().map(|req| self.handle(req));
+            tokio::pin!(requests);
+
+            while let Some(res) = runner.next_result(&mut requests).await.transpose()? {
                 yield res;
             }
-        }
-    }
-}
-
-#[derive(Default)]
-struct RunningCommands {
-    closed: bool,
-    running: Vec<JoinHandle<Result<Value, RpcError>>>,
-}
-
-impl Stream for RunningCommands {
-    type Item = Result<Value, RpcError>;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let item = self
-            .running
-            .iter_mut()
-            .enumerate()
-            .find_map(|(i, f)| match f.poll_unpin(cx) {
-                std::task::Poll::Pending => None,
-                std::task::Poll::Ready(e) => Some((
-                    i,
-                    e.map_err(|e| RpcError {
-                        data: Some(e.to_string().into()),
-                        ..yajrc::INTERNAL_ERROR
-                    })
-                    .and_then(|a| a),
-                )),
-            });
-        match item {
-            Some((idx, res)) => {
-                drop(self.running.swap_remove(idx));
-                std::task::Poll::Ready(Some(res))
-            }
-            None => {
-                if !self.closed || !self.running.is_empty() {
-                    std::task::Poll::Pending
-                } else {
-                    std::task::Poll::Ready(None)
-                }
-            }
-        }
-    }
-}
-impl Drop for RunningCommands {
-    fn drop(&mut self) {
-        for hdl in &self.running {
-            hdl.abort();
-        }
-        if let Ok(rt) = Handle::try_current() {
-            rt.block_on(join_all(std::mem::take(&mut self.running).into_iter()));
         }
     }
 }

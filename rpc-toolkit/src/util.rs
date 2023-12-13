@@ -1,3 +1,7 @@
+use std::fmt::Display;
+
+use futures::future::BoxFuture;
+use futures::{Future, FutureExt, Stream, StreamExt};
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -42,10 +46,17 @@ pub fn invalid_request(e: imbl_value::Error) -> RpcError {
     }
 }
 
-pub fn parse_error(e: imbl_value::Error) -> RpcError {
+pub fn parse_error(e: impl Display) -> RpcError {
     RpcError {
         data: Some(e.to_string().into()),
         ..yajrc::PARSE_ERROR
+    }
+}
+
+pub fn internal_error(e: impl Display) -> RpcError {
+    RpcError {
+        data: Some(e.to_string().into()),
+        ..yajrc::INTERNAL_ERROR
     }
 }
 
@@ -63,5 +74,74 @@ where
         let a = imbl_value::from_value(v.clone()).map_err(serde::de::Error::custom)?;
         let b = imbl_value::from_value(v).map_err(serde::de::Error::custom)?;
         Ok(Flat(a, b))
+    }
+}
+
+pub fn poll_select_all<'a, T>(
+    futs: &mut Vec<BoxFuture<'a, T>>,
+    cx: &mut std::task::Context<'_>,
+) -> std::task::Poll<T> {
+    let item = futs
+        .iter_mut()
+        .enumerate()
+        .find_map(|(i, f)| match f.poll_unpin(cx) {
+            std::task::Poll::Pending => None,
+            std::task::Poll::Ready(e) => Some((i, e)),
+        });
+    match item {
+        Some((idx, res)) => {
+            drop(futs.swap_remove(idx));
+            std::task::Poll::Ready(res)
+        }
+        None => std::task::Poll::Pending,
+    }
+}
+
+pub struct JobRunner<'a, T> {
+    closed: bool,
+    running: Vec<BoxFuture<'a, T>>,
+}
+impl<'a, T> JobRunner<'a, T> {
+    pub fn new() -> Self {
+        JobRunner {
+            closed: false,
+            running: Vec::new(),
+        }
+    }
+    pub async fn next_result<
+        Src: Stream<Item = Fut> + Unpin,
+        Fut: Future<Output = T> + Send + 'a,
+    >(
+        &mut self,
+        job_source: &mut Src,
+    ) -> Option<T> {
+        loop {
+            tokio::select! {
+                job = job_source.next() => {
+                    if let Some(job) = job {
+                        self.running.push(job.boxed());
+                    } else {
+                        self.closed = true;
+                    }
+                }
+                res = self.next() => {
+                    return res;
+                }
+            }
+        }
+    }
+}
+impl<'a, T> Stream for JobRunner<'a, T> {
+    type Item = T;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match poll_select_all(&mut self.running, cx) {
+            std::task::Poll::Pending if self.closed && self.running.is_empty() => {
+                std::task::Poll::Ready(None)
+            }
+            a => a.map(Some),
+        }
     }
 }
