@@ -1,6 +1,7 @@
 pub use cli::*;
-pub use command::*;
+// pub use command::*;
 pub use context::Context;
+pub use handler::*;
 /// `#[command(...)]`
 /// - `#[command(cli_only)]` -> executed by CLI instead of RPC server (leaf commands only)
 /// - `#[command(rpc_only)]` -> no CLI bindings (leaf commands only)
@@ -28,6 +29,7 @@ pub use {clap, futures, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
 
 mod cli;
 mod command;
+mod handler;
 // pub mod command_helpers;
 mod context;
 // mod metadata;

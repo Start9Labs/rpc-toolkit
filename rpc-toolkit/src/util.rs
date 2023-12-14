@@ -4,7 +4,8 @@ use futures::future::BoxFuture;
 use futures::{Future, FutureExt, Stream, StreamExt};
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::ser::Error;
+use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
 pub fn extract<T: DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
@@ -14,18 +15,20 @@ pub fn extract<T: DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
     })
 }
 
-pub fn combine(v1: Value, v2: Value) -> Result<Value, RpcError> {
+pub fn combine(v1: Value, v2: Value) -> Result<Value, imbl_value::Error> {
     let (Value::Object(mut v1), Value::Object(v2)) = (v1, v2) else {
-        return Err(RpcError {
-            data: Some("params must be object".into()),
-            ..yajrc::INVALID_PARAMS_ERROR
+        return Err(imbl_value::Error {
+            kind: imbl_value::ErrorKind::Serialization,
+            source: serde_json::Error::custom("params must be object"),
         });
     };
     for (key, value) in v2 {
         if v1.insert(key.clone(), value).is_some() {
-            return Err(RpcError {
-                data: Some(format!("duplicate key: {key}").into()),
-                ..yajrc::INVALID_PARAMS_ERROR
+            return Err(imbl_value::Error {
+                kind: imbl_value::ErrorKind::Serialization,
+                source: serde_json::Error::custom(lazy_format::lazy_format!(
+                    "duplicate key: {key}"
+                )),
             });
         }
     }
@@ -74,6 +77,29 @@ where
         let a = imbl_value::from_value(v.clone()).map_err(serde::de::Error::custom)?;
         let b = imbl_value::from_value(v).map_err(serde::de::Error::custom)?;
         Ok(Flat(a, b))
+    }
+}
+impl<A, B> Serialize for Flat<A, B>
+where
+    A: Serialize,
+    B: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(serde::Serialize)]
+        struct FlatStruct<'a, A, B> {
+            #[serde(flatten)]
+            a: &'a A,
+            #[serde(flatten)]
+            b: &'a B,
+        }
+        FlatStruct {
+            a: &self.0,
+            b: &self.1,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -145,3 +171,17 @@ impl<'a, T> Stream for JobRunner<'a, T> {
         }
     }
 }
+
+// #[derive(Debug)]
+// pub enum Infallible {}
+// impl<T> From<Infallible> for T {
+//     fn from(value: Infallible) -> Self {
+//         match value {}
+//     }
+// }
+// impl std::fmt::Display for Infallible {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match *self {}
+//     }
+// }
+// impl std::error::Error for Infallible {}

@@ -11,58 +11,56 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use url::Url;
 use yajrc::{Id, RpcError};
 
-use crate::command::{AsyncCommand, DynCommand, LeafCommand, ParentInfo};
+use crate::command::ParentCommand;
+// use crate::command::{AsyncCommand, DynCommand, LeafCommand, ParentInfo};
 use crate::util::{combine, internal_error, invalid_params, parse_error};
-use crate::{CliBindings, SyncCommand};
+// use crate::{CliBindings, SyncCommand};
 
 type GenericRpcMethod<'a> = yajrc::GenericRpcMethod<&'a str, Value, Value>;
 type RpcRequest<'a> = yajrc::RpcRequest<GenericRpcMethod<'a>>;
 type RpcResponse<'a> = yajrc::RpcResponse<GenericRpcMethod<'static>>;
 
-impl<Context: crate::Context> DynCommand<Context> {
-    fn cli_app(&self) -> Option<clap::Command> {
-        if let Some(cli) = &self.cli {
-            Some(
-                cli.cmd
-                    .clone()
-                    .name(self.name)
-                    .subcommands(self.subcommands.iter().filter_map(|c| c.cli_app())),
-            )
-        } else {
-            None
-        }
-    }
-    fn cmd_from_cli_matches(
-        &self,
-        matches: &ArgMatches,
-        parent: ParentInfo<Value>,
-    ) -> Result<(Vec<&'static str>, Value, &DynCommand<Context>), RpcError> {
-        let params = combine(
-            parent.params,
-            (self
-                .cli
-                .as_ref()
-                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-                .parser)(matches)?,
-        )?;
-        if let Some((cmd, matches)) = matches.subcommand() {
-            let mut method = parent.method;
-            method.push(self.name);
-            self.subcommands
-                .iter()
-                .find(|c| c.name == cmd)
-                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-                .cmd_from_cli_matches(matches, ParentInfo { method, params })
-        } else {
-            Ok((parent.method, params, self))
-        }
-    }
-}
+// impl<Context: crate::Context> DynCommand<Context> {
+//     fn cli_app(&self) -> Option<clap::Command> {
+//         if let Some(cli) = &self.cli {
+//             Some(
+//                 cli.cmd
+//                     .clone()
+//                     .name(self.name)
+//                     .subcommands(self.subcommands.iter().filter_map(|c| c.cli_app())),
+//             )
+//         } else {
+//             None
+//         }
+//     }
+//     fn cmd_from_cli_matches(
+//         &self,
+//         matches: &ArgMatches,
+//         parent: ParentInfo<Value>,
+//     ) -> Result<(Vec<&'static str>, Value, &DynCommand<Context>), RpcError> {
+//         let params = combine(
+//             parent.params,
+//             (self
+//                 .cli
+//                 .as_ref()
+//                 .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+//                 .parser)(matches)?,
+//         )?;
+//         if let Some((cmd, matches)) = matches.subcommand() {
+//             let mut method = parent.method;
+//             method.push(self.name);
+//             self.subcommands
+//                 .iter()
+//                 .find(|c| c.name == cmd)
+//                 .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
+//                 .cmd_from_cli_matches(matches, ParentInfo { method, params })
+//         } else {
+//             Ok((parent.method, params, self))
+//         }
+//     }
+// }
 
-struct CliApp<Context: crate::Context> {
-    cli: CliBindings<Context>,
-    commands: Vec<DynCommand<Context>>,
-}
+struct CliApp<Context: crate::Context>(ParentCommand<Context>);
 impl<Context: crate::Context> CliApp<Context> {
     pub fn new<Cmd: FromArgMatches + CommandFactory + Serialize>(
         commands: Vec<DynCommand<Context>>,
@@ -306,7 +304,8 @@ where
                 combine(
                     imbl_value::to_value(&self).map_err(invalid_params)?,
                     imbl_value::to_value(&parent.params).map_err(invalid_params)?,
-                )?,
+                )
+                .map_err(invalid_params)?,
             )
             .await?,
         )
@@ -330,15 +329,18 @@ where
     ) -> Result<Self::Ok, Self::Err> {
         let mut method = parent.method;
         method.push(Self::NAME);
-        Ok(
-            imbl_value::from_value(ctx.runtime().block_on(ctx.call_remote(
-                &method.join("."),
-                combine(
-                    imbl_value::to_value(&self).map_err(invalid_params)?,
-                    imbl_value::to_value(&parent.params).map_err(invalid_params)?,
-                )?,
-            ))?)
-            .map_err(parse_error)?,
+        Ok(imbl_value::from_value(
+            ctx.runtime().block_on(
+                ctx.call_remote(
+                    &method.join("."),
+                    combine(
+                        imbl_value::to_value(&self).map_err(invalid_params)?,
+                        imbl_value::to_value(&parent.params).map_err(invalid_params)?,
+                    )
+                    .map_err(invalid_params)?,
+                ),
+            )?,
         )
+        .map_err(parse_error)?)
     }
 }
