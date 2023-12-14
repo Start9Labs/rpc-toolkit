@@ -966,7 +966,7 @@ pub fn parse_param_attrs(item: &mut ItemFn) -> Result<Vec<ParamType>> {
                             attr.span(),
                             "`context` and `response` are mutually exclusive",
                         ));
-                    } else if matches!(ty, ParamType::Context(_)) {
+                    } else if matches!(ty, ParamType::ParentData(_)) {
                         return Err(Error::new(
                             attr.span(),
                             "`parent_data` and `response` are mutually exclusive",

@@ -1,17 +1,18 @@
-use std::ffi::OsString;
+use std::{ffi::OsString, marker::PhantomData};
 
 use clap::{ArgMatches, CommandFactory, FromArgMatches};
-use futures::future::BoxFuture;
+use futures::{future::BoxFuture, never::Never};
 use futures::{Future, FutureExt};
 use imbl_value::Value;
 use reqwest::{Client, Method};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::marker::PhantomData;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use url::Url;
 use yajrc::{Id, RpcError};
 
-use crate::command::ParentCommand;
+use crate::{command::ParentCommand, CliBindings, EmptyHandler, HandleArgs, Handler, NoParams};
 // use crate::command::{AsyncCommand, DynCommand, LeafCommand, ParentInfo};
 use crate::util::{combine, internal_error, invalid_params, parse_error};
 // use crate::{CliBindings, SyncCommand};
@@ -60,11 +61,47 @@ type RpcResponse<'a> = yajrc::RpcResponse<GenericRpcMethod<'static>>;
 //     }
 // }
 
-struct CliApp<Context: crate::Context>(ParentCommand<Context>);
+struct RootCliHandler<Context: crate::Context, Config: CommandFactory + FromArgMatches>(
+    PhantomData<(Context, Config)>,
+);
+impl<Context: crate::Context, Config: CommandFactory + FromArgMatches> Handler<Context>
+    for RootCliHandler<Context, Config>
+{
+    type Params = NoParams;
+    type InheritedParams = NoParams;
+    type Ok = Never;
+    type Err = RpcError;
+    fn handle_sync(&self, _: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
+        Err(yajrc::METHOD_NOT_FOUND_ERROR)
+    }
+}
+impl<Context: crate::Context, Config: CommandFactory + FromArgMatches> CliBindings
+    for RootCliHandler<Context, Config>
+{
+    fn cli_command(&self) -> clap::Command {
+        Config::command()
+    }
+
+    fn cli_parse(
+        &self,
+        matches: &ArgMatches,
+    ) -> Result<(std::collections::VecDeque<&'static str>, Value), clap::Error> {
+    }
+
+    fn cli_display(
+        &self,
+        handle_args: HandleArgs<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        todo!()
+    }
+}
+
+struct CliApp<Context: crate::Context, Config: CommandFactory + FromArgMatches>(
+    ParentCommand<Context, EmptyHandler<Config>>,
+);
 impl<Context: crate::Context> CliApp<Context> {
-    pub fn new<Cmd: FromArgMatches + CommandFactory + Serialize>(
-        commands: Vec<DynCommand<Context>>,
-    ) -> Self {
+    pub fn new(commands: Vec<DynCommand<Context>>) -> Self {
         Self {
             cli: CliBindings::from_parent::<Cmd>(),
             commands,

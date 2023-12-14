@@ -9,14 +9,14 @@ use yajrc::RpcError;
 
 use crate::util::{combine, internal_error, invalid_params, Flat};
 
-struct HandleAnyArgs<Context> {
-    context: Context,
+struct HandleAnyArgs {
+    context: Box<dyn crate::Context>,
     parent_method: Vec<&'static str>,
     method: VecDeque<&'static str>,
     params: Value,
 }
-impl<Context: crate::Context> HandleAnyArgs<Context> {
-    fn downcast<H>(self) -> Result<HandleArgs<Context, H>, imbl_value::Error>
+impl HandleAnyArgs {
+    fn downcast<Context: crate::Context, H>(self) -> Result<HandleArgs<Context, H>, imbl_value::Error>
     where
         H: Handler<Context>,
         H::Params: DeserializeOwned,
@@ -34,6 +34,9 @@ impl<Context: crate::Context> HandleAnyArgs<Context> {
             method,
             params: imbl_value::from_value(params.clone())?,
             inherited_params: imbl_value::from_value(params.clone())?,
+        })
+    }
+}rams.clone())?,
         })
     }
 }
@@ -294,7 +297,9 @@ pub struct NoParams {}
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
 enum Never {}
 
-struct EmptyHandler<Params, InheritedParams>(PhantomData<(Params, InheritedParams)>);
+pub(crate) struct EmptyHandler<Params = NoParams, InheritedParams = NoParams>(
+    PhantomData<(Params, InheritedParams)>,
+);
 impl<Context: crate::Context, Params, InheritedParams> Handler<Context>
     for EmptyHandler<Params, InheritedParams>
 {
@@ -307,14 +312,13 @@ impl<Context: crate::Context, Params, InheritedParams> Handler<Context>
     }
 }
 
-pub struct ParentHandler<Context: crate::Context, H: Handler<Context>> {
+pub struct ParentHandler<Context: crate::Context, H: Handler<Context> = EmptyHandler> {
     handler: H,
     subcommands: BTreeMap<&'static str, DynHandler<Context>>,
 }
-impl<Context: crate::Context, Params, InheritedParams>
-    ParentHandler<Context, EmptyHandler<Params, InheritedParams>>
+impl<Context: crate::Context> ParentHandler<Context>
 where
-    EmptyHandler<Params, InheritedParams>: CliBindings<Context>,
+    EmptyHandler: CliBindings<Context>,
 {
     pub fn new() -> Self {
         Self {
