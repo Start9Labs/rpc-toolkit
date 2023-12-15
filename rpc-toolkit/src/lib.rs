@@ -1,6 +1,6 @@
 // pub use cli::*;
 // pub use command::*;
-pub use context::Context;
+pub use context::*;
 pub use handler::*;
 /// `#[command(...)]`
 /// - `#[command(cli_only)]` -> executed by CLI instead of RPC server (leaf commands only)

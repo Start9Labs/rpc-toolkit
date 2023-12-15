@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::any::TypeId;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches, Parser};
 use imbl_value::Value;
@@ -7,16 +9,18 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
+use crate::context::{AnyContext, IntoContext};
+use crate::handler;
 use crate::util::{combine, internal_error, invalid_params, Flat};
 
 struct HandleAnyArgs {
-    context: Box<dyn crate::Context>,
+    context: AnyContext,
     parent_method: Vec<&'static str>,
     method: VecDeque<&'static str>,
     params: Value,
 }
 impl HandleAnyArgs {
-    fn downcast<Context: crate::Context, H>(self) -> Result<HandleArgs<Context, H>, imbl_value::Error>
+    fn downcast<Context: IntoContext, H>(self) -> Result<HandleArgs<Context, H>, imbl_value::Error>
     where
         H: Handler<Context>,
         H::Params: DeserializeOwned,
@@ -29,38 +33,34 @@ impl HandleAnyArgs {
             params,
         } = self;
         Ok(HandleArgs {
-            context,
+            context: Context::downcast(context).map_err(|_| imbl_value::Error {
+                kind: imbl_value::ErrorKind::Deserialization,
+                source: serde::ser::Error::custom("context does not match expected"),
+            })?,
             parent_method,
             method,
             params: imbl_value::from_value(params.clone())?,
             inherited_params: imbl_value::from_value(params.clone())?,
         })
     }
-}rams.clone())?,
-        })
-    }
 }
 
 #[async_trait::async_trait]
-trait HandleAny<Context: crate::Context> {
-    fn handle_sync(&self, handle_args: HandleAnyArgs<Context>) -> Result<Value, RpcError>;
+trait HandleAny {
+    fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
     // async fn handle_async(&self, handle_args: HandleAnyArgs<Context>) -> Result<Value, RpcError>;
 }
 
-trait CliBindingsAny<Context: crate::Context> {
+trait CliBindingsAny {
     fn cli_command(&self) -> Command;
     fn cli_parse(
         &self,
         matches: &ArgMatches,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error>;
-    fn cli_display(
-        &self,
-        handle_args: HandleAnyArgs<Context>,
-        result: Value,
-    ) -> Result<(), RpcError>;
+    fn cli_display(&self, handle_args: HandleAnyArgs, result: Value) -> Result<(), RpcError>;
 }
 
-pub trait CliBindings<Context: crate::Context>: Handler<Context> {
+pub trait CliBindings<Context: IntoContext>: Handler<Context> {
     fn cli_command(&self) -> Command;
     fn cli_parse(
         &self,
@@ -73,7 +73,7 @@ pub trait CliBindings<Context: crate::Context>: Handler<Context> {
     ) -> Result<(), Self::Err>;
 }
 
-pub trait PrintCliResult<Context: crate::Context>: Handler<Context> {
+pub trait PrintCliResult<Context: IntoContext>: Handler<Context> {
     fn print(
         &self,
         handle_args: HandleArgs<Context, Self>,
@@ -83,7 +83,7 @@ pub trait PrintCliResult<Context: crate::Context>: Handler<Context> {
 
 // impl<Context, H> PrintCliResult<Context> for H
 // where
-//     Context: crate::Context,
+//     Context: IntoContext,
 //     H: Handler<Context>,
 //     H::Ok: Display,
 // {
@@ -103,7 +103,7 @@ struct WithCliBindings<Context, H> {
 
 impl<Context, H> Handler<Context> for WithCliBindings<Context, H>
 where
-    Context: crate::Context,
+    Context: IntoContext,
     H: Handler<Context>,
 {
     type Params = H::Params;
@@ -132,7 +132,7 @@ where
 
 impl<Context, H> CliBindings<Context> for WithCliBindings<Context, H>
 where
-    Context: crate::Context,
+    Context: IntoContext,
     H: Handler<Context>,
     H::Params: FromArgMatches + CommandFactory + Serialize,
     H: PrintCliResult<Context>,
@@ -176,18 +176,16 @@ where
     }
 }
 
-trait HandleAnyWithCli<Context: crate::Context>: HandleAny<Context> + CliBindingsAny<Context> {}
-impl<Context: crate::Context, T: HandleAny<Context> + CliBindingsAny<Context>>
-    HandleAnyWithCli<Context> for T
-{
-}
+trait HandleAnyWithCli: HandleAny + CliBindingsAny {}
+impl<T: HandleAny + CliBindingsAny> HandleAnyWithCli for T {}
 
-enum DynHandler<Context> {
-    WithoutCli(Box<dyn HandleAny<Context>>),
-    WithCli(Box<dyn HandleAnyWithCli<Context>>),
+#[derive(Clone)]
+enum DynHandler {
+    WithoutCli(Arc<dyn HandleAny>),
+    WithCli(Arc<dyn HandleAnyWithCli>),
 }
-impl<Context: crate::Context> HandleAny<Context> for DynHandler<Context> {
-    fn handle_sync(&self, handle_args: HandleAnyArgs<Context>) -> Result<Value, RpcError> {
+impl HandleAny for DynHandler {
+    fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
         match self {
             DynHandler::WithoutCli(h) => h.handle_sync(handle_args),
             DynHandler::WithCli(h) => h.handle_sync(handle_args),
@@ -195,47 +193,23 @@ impl<Context: crate::Context> HandleAny<Context> for DynHandler<Context> {
     }
 }
 
-pub struct HandleArgs<Context: crate::Context, H: Handler<Context> + ?Sized> {
+pub struct HandleArgs<Context: IntoContext, H: Handler<Context> + ?Sized> {
     context: Context,
     parent_method: Vec<&'static str>,
     method: VecDeque<&'static str>,
     params: H::Params,
     inherited_params: H::InheritedParams,
 }
-impl<Context, H> HandleArgs<Context, H>
-where
-    Context: crate::Context,
-    H: Handler<Context>,
-    H::Params: Serialize,
-    H::InheritedParams: Serialize,
-{
-    fn upcast(
-        Self {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-        }: Self,
-    ) -> Result<HandleAnyArgs<Context>, imbl_value::Error> {
-        Ok(HandleAnyArgs {
-            context,
-            parent_method,
-            method,
-            params: combine(
-                imbl_value::to_value(&params)?,
-                imbl_value::to_value(&inherited_params)?,
-            )?,
-        })
-    }
-}
 
-pub trait Handler<Context: crate::Context> {
+pub trait Handler<Context: IntoContext> {
     type Params;
     type InheritedParams;
     type Ok;
     type Err;
     fn handle_sync(&self, handle_args: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err>;
+    fn contexts(&self) -> Option<BTreeSet<TypeId>> {
+        Context::type_ids_for(self)
+    }
 }
 
 struct AnyHandler<Context, H> {
@@ -243,14 +217,14 @@ struct AnyHandler<Context, H> {
     handler: H,
 }
 
-impl<Context: crate::Context, H: Handler<Context>> HandleAny<Context> for AnyHandler<Context, H>
+impl<Context: IntoContext, H: Handler<Context>> HandleAny for AnyHandler<Context, H>
 where
     H::Params: DeserializeOwned,
     H::InheritedParams: DeserializeOwned,
     H::Ok: Serialize,
     RpcError: From<H::Err>,
 {
-    fn handle_sync(&self, handle_args: HandleAnyArgs<Context>) -> Result<Value, RpcError> {
+    fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
         imbl_value::to_value(
             &self
                 .handler
@@ -260,8 +234,7 @@ where
     }
 }
 
-impl<Context: crate::Context, H: CliBindings<Context>> CliBindingsAny<Context>
-    for AnyHandler<Context, H>
+impl<Context: IntoContext, H: CliBindings<Context>> CliBindingsAny for AnyHandler<Context, H>
 where
     H::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
     H::InheritedParams: DeserializeOwned,
@@ -277,11 +250,7 @@ where
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
         self.handler.cli_parse(matches)
     }
-    fn cli_display(
-        &self,
-        handle_args: HandleAnyArgs<Context>,
-        result: Value,
-    ) -> Result<(), RpcError> {
+    fn cli_display(&self, handle_args: HandleAnyArgs, result: Value) -> Result<(), RpcError> {
         self.handler
             .cli_display(
                 handle_args.downcast().map_err(invalid_params)?,
@@ -295,83 +264,83 @@ where
 pub struct NoParams {}
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
-enum Never {}
+pub enum Never {}
 
-pub(crate) struct EmptyHandler<Params = NoParams, InheritedParams = NoParams>(
-    PhantomData<(Params, InheritedParams)>,
-);
-impl<Context: crate::Context, Params, InheritedParams> Handler<Context>
-    for EmptyHandler<Params, InheritedParams>
-{
-    type Params = Params;
-    type InheritedParams = InheritedParams;
-    type Ok = Never;
-    type Err = RpcError;
-    fn handle_sync(&self, _: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
-        Err(yajrc::METHOD_NOT_FOUND_ERROR)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Name(Option<&'static str>);
+impl<'a> std::borrow::Borrow<Option<&'a str>> for Name {
+    fn borrow(&self) -> &Option<&'a str> {
+        &self.0
     }
 }
 
-pub struct ParentHandler<Context: crate::Context, H: Handler<Context> = EmptyHandler> {
-    handler: H,
-    subcommands: BTreeMap<&'static str, DynHandler<Context>>,
+struct SubcommandMap(BTreeMap<Name, BTreeMap<Option<TypeId>, DynHandler>>);
+impl SubcommandMap {
+    fn insert(
+        &mut self,
+        ctx_tys: Option<BTreeSet<TypeId>>,
+        name: Option<&'static str>,
+        handler: DynHandler,
+    ) {
+        let mut for_name = self.0.remove(&name).unwrap_or_default();
+        if let Some(ctx_tys) = ctx_tys {
+            for ctx_ty in ctx_tys {
+                for_name.insert(Some(ctx_ty), handler.clone());
+            }
+        } else {
+            for_name.insert(None, handler);
+        }
+        self.0.insert(Name(name), for_name);
+    }
+
+    fn get<'a>(&'a self, ctx_ty: TypeId, name: Option<&str>) -> Option<(Name, &'a DynHandler)> {
+        if let Some((name, for_name)) = self.0.get_key_value(&name) {
+            if let Some(for_ctx) = for_name.get(&Some(ctx_ty)) {
+                Some((*name, for_ctx))
+            } else {
+                for_name.get(&None).map(|h| (*name, h))
+            }
+        } else {
+            None
+        }
+    }
 }
-impl<Context: crate::Context> ParentHandler<Context>
-where
-    EmptyHandler: CliBindings<Context>,
-{
+
+pub struct ParentHandler<Params = NoParams, InheritedParams = NoParams> {
+    _phantom: PhantomData<(Params, InheritedParams)>,
+    subcommands: SubcommandMap,
+}
+impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     pub fn new() -> Self {
         Self {
-            handler: WithCliBindings {
-                _ctx: PhantomData,
-                handler: EmptyHandler(PhantomData).into(),
-            },
-            subcommands: BTreeMap::new(),
-        }
-    }
-}
-
-impl<Context: crate::Context, Params, InheritedParams>
-    ParentHandler<Context, EmptyHandler<Params, InheritedParams>>
-{
-    pub fn new_no_cli() -> Self {
-        Self {
-            handler: EmptyHandler(PhantomData).into(),
-            subcommands: BTreeMap::new(),
-        }
-    }
-}
-
-impl<Context: crate::Context, H: Handler<Context>> From<H> for ParentHandler<Context, H> {
-    fn from(value: H) -> Self {
-        Self {
-            handler: value.into(),
-            subcommands: BTreeMap::new(),
+            _phantom: PhantomData,
+            subcommands: SubcommandMap(BTreeMap::new()),
         }
     }
 }
 
 struct InheritanceHandler<
-    Context: crate::Context,
+    Context: IntoContext,
+    Params,
+    InheritedParams,
     H: Handler<Context>,
-    SubH: Handler<Context>,
-    F: Fn(H::Params, H::InheritedParams) -> SubH::InheritedParams,
+    F: Fn(Params, InheritedParams) -> H::InheritedParams,
 > {
-    _phantom: PhantomData<(Context, H)>,
-    handler: SubH,
+    _phantom: PhantomData<(Context, Params, InheritedParams)>,
+    handler: H,
     inherit: F,
 }
-impl<
-        Context: crate::Context,
-        H: Handler<Context>,
-        SubH: Handler<Context>,
-        F: Fn(H::Params, H::InheritedParams) -> SubH::InheritedParams,
-    > Handler<Context> for InheritanceHandler<Context, H, SubH, F>
+impl<Context, Params, InheritedParams, H, F> Handler<Context>
+    for InheritanceHandler<Context, Params, InheritedParams, H, F>
+where
+    Context: IntoContext,
+    H: Handler<Context>,
+    F: Fn(Params, InheritedParams) -> H::InheritedParams,
 {
-    type Params = SubH::Params;
-    type InheritedParams = Flat<H::Params, H::InheritedParams>;
-    type Ok = SubH::Ok;
-    type Err = SubH::Err;
+    type Params = H::Params;
+    type InheritedParams = Flat<Params, InheritedParams>;
+    type Ok = H::Ok;
+    type Err = H::Err;
     fn handle_sync(
         &self,
         HandleArgs {
@@ -392,12 +361,12 @@ impl<
     }
 }
 
-impl<Context, H, SubH, F> PrintCliResult<Context> for InheritanceHandler<Context, H, SubH, F>
+impl<Context, Params, InheritedParams, H, F> PrintCliResult<Context>
+    for InheritanceHandler<Context, Params, InheritedParams, H, F>
 where
-    Context: crate::Context,
-    H: Handler<Context>,
-    SubH: Handler<Context> + PrintCliResult<Context>,
-    F: Fn(H::Params, H::InheritedParams) -> SubH::InheritedParams,
+    Context: IntoContext,
+    H: Handler<Context> + PrintCliResult<Context>,
+    F: Fn(Params, InheritedParams) -> H::InheritedParams,
 {
     fn print(
         &self,
@@ -423,17 +392,19 @@ where
     }
 }
 
-impl<Context: crate::Context, H: Handler<Context>> ParentHandler<Context, H> {
-    pub fn subcommand<SubH>(mut self, method: &'static str, handler: SubH) -> Self
+impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
+    pub fn subcommand<Context, H>(mut self, name: Option<&'static str>, handler: H) -> Self
     where
-        SubH: Handler<Context, InheritedParams = NoParams> + PrintCliResult<Context> + 'static,
-        SubH::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
-        SubH::Ok: Serialize + DeserializeOwned,
-        RpcError: From<SubH::Err>,
+        Context: IntoContext,
+        H: Handler<Context, InheritedParams = NoParams> + PrintCliResult<Context> + 'static,
+        H::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
+        H::Ok: Serialize + DeserializeOwned,
+        RpcError: From<H::Err>,
     {
         self.subcommands.insert(
-            method,
-            DynHandler::WithCli(Box::new(AnyHandler {
+            handler.contexts(),
+            name,
+            DynHandler::WithCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
                 handler: WithCliBindings {
                     _ctx: PhantomData,
@@ -443,29 +414,52 @@ impl<Context: crate::Context, H: Handler<Context>> ParentHandler<Context, H> {
         );
         self
     }
-    pub fn subcommand_with_inherited<SubH, F>(
+    pub fn subcommand_no_cli<Context, H>(mut self, name: Option<&'static str>, handler: H) -> Self
+    where
+        Context: IntoContext,
+        H: Handler<Context, InheritedParams = NoParams> + 'static,
+        H::Params: DeserializeOwned,
+        H::Ok: Serialize,
+        RpcError: From<H::Err>,
+    {
+        self.subcommands.insert(
+            handler.contexts(),
+            name,
+            DynHandler::WithoutCli(Arc::new(AnyHandler {
+                _ctx: PhantomData,
+                handler,
+            })),
+        );
+        self
+    }
+}
+impl<Params, InheritedParams> ParentHandler<Params, InheritedParams>
+where
+    Params: DeserializeOwned + 'static,
+    InheritedParams: DeserializeOwned + 'static,
+{
+    pub fn subcommand_with_inherited<Context, H, F>(
         mut self,
-        method: &'static str,
-        handler: SubH,
+        name: Option<&'static str>,
+        handler: H,
         inherit: F,
     ) -> Self
     where
-        SubH: Handler<Context> + PrintCliResult<Context> + 'static,
-        SubH::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
-        SubH::Ok: Serialize + DeserializeOwned,
-        H: 'static,
-        H::Params: DeserializeOwned,
-        H::InheritedParams: DeserializeOwned,
-        RpcError: From<SubH::Err>,
-        F: Fn(H::Params, H::InheritedParams) -> SubH::InheritedParams + 'static,
+        Context: IntoContext,
+        H: Handler<Context> + PrintCliResult<Context> + 'static,
+        H::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
+        H::Ok: Serialize + DeserializeOwned,
+        RpcError: From<H::Err>,
+        F: Fn(Params, InheritedParams) -> H::InheritedParams + 'static,
     {
         self.subcommands.insert(
-            method,
-            DynHandler::WithCli(Box::new(AnyHandler {
+            handler.contexts(),
+            name,
+            DynHandler::WithCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
                 handler: WithCliBindings {
                     _ctx: PhantomData,
-                    handler: InheritanceHandler::<Context, H, SubH, F> {
+                    handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
                         _phantom: PhantomData,
                         handler,
                         inherit,
@@ -475,43 +469,26 @@ impl<Context: crate::Context, H: Handler<Context>> ParentHandler<Context, H> {
         );
         self
     }
-    pub fn subcommand_no_cli<SubH>(mut self, method: &'static str, handler: SubH) -> Self
-    where
-        SubH: Handler<Context, InheritedParams = NoParams> + 'static,
-        SubH::Params: DeserializeOwned,
-        SubH::Ok: Serialize,
-        RpcError: From<SubH::Err>,
-    {
-        self.subcommands.insert(
-            method,
-            DynHandler::WithoutCli(Box::new(AnyHandler {
-                _ctx: PhantomData,
-                handler,
-            })),
-        );
-        self
-    }
-    pub fn subcommand_with_inherited_no_cli<SubH, F>(
+    pub fn subcommand_with_inherited_no_cli<Context, H, F>(
         mut self,
-        method: &'static str,
-        handler: SubH,
+        name: Option<&'static str>,
+        handler: H,
         inherit: F,
     ) -> Self
     where
-        SubH: Handler<Context> + 'static,
-        SubH::Params: DeserializeOwned,
-        SubH::Ok: Serialize,
-        H: 'static,
+        Context: IntoContext,
+        H: Handler<Context> + 'static,
         H::Params: DeserializeOwned,
-        H::InheritedParams: DeserializeOwned,
-        RpcError: From<SubH::Err>,
-        F: Fn(H::Params, H::InheritedParams) -> SubH::InheritedParams + 'static,
+        H::Ok: Serialize,
+        RpcError: From<H::Err>,
+        F: Fn(Params, InheritedParams) -> H::InheritedParams + 'static,
     {
         self.subcommands.insert(
-            method,
-            DynHandler::WithoutCli(Box::new(AnyHandler {
+            handler.contexts(),
+            name,
+            DynHandler::WithoutCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
-                handler: InheritanceHandler::<Context, H, SubH, F> {
+                handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
                     _phantom: PhantomData,
                     handler,
                     inherit,
@@ -522,17 +499,11 @@ impl<Context: crate::Context, H: Handler<Context>> ParentHandler<Context, H> {
     }
 }
 
-impl<Context, H> Handler<Context> for ParentHandler<Context, H>
-where
-    Context: crate::Context,
-    H: Handler<Context>,
-    H::Params: Serialize,
-    H::InheritedParams: Serialize,
-    H::Ok: Serialize + DeserializeOwned,
-    RpcError: From<H::Err>,
+impl<Params: Serialize, InheritedParams: Serialize> Handler<AnyContext>
+    for ParentHandler<Params, InheritedParams>
 {
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
+    type Params = Params;
+    type InheritedParams = InheritedParams;
     type Ok = Value;
     type Err = RpcError;
     fn handle_sync(
@@ -543,71 +514,74 @@ where
             mut method,
             params,
             inherited_params,
-        }: HandleArgs<Context, Self>,
+        }: HandleArgs<AnyContext, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        if let Some(cmd) = method.pop_front() {
+        let cmd = method.pop_front();
+        if let Some(cmd) = cmd {
             parent_method.push(cmd);
-            if let Some(sub_handler) = self.subcommands.get(cmd) {
-                sub_handler.handle_sync(HandleAnyArgs {
-                    context,
-                    parent_method,
-                    method,
-                    params: imbl_value::to_value(&Flat(params, inherited_params))
-                        .map_err(invalid_params)?,
-                })
-            } else {
-                Err(yajrc::METHOD_NOT_FOUND_ERROR)
-            }
-        } else {
-            self.handler
-                .handle_sync(HandleArgs {
-                    context,
-                    parent_method,
-                    method,
-                    params,
-                    inherited_params,
-                })
-                .map_err(RpcError::from)
-                .and_then(|r| imbl_value::to_value(&r).map_err(internal_error))
         }
+        if let Some((_, sub_handler)) = self.subcommands.get(context.inner_type_id(), cmd) {
+            sub_handler.handle_sync(HandleAnyArgs {
+                context: context.upcast(),
+                parent_method,
+                method,
+                params: imbl_value::to_value(&Flat(params, inherited_params))
+                    .map_err(invalid_params)?,
+            })
+        } else {
+            Err(yajrc::METHOD_NOT_FOUND_ERROR)
+        }
+    }
+    fn contexts(&self) -> Option<BTreeSet<TypeId>> {
+        let mut set = BTreeSet::new();
+        for ctx_ty in self.subcommands.0.values().flat_map(|c| c.keys()) {
+            set.insert((*ctx_ty)?);
+        }
+        Some(set)
     }
 }
 
-impl<Context, H> CliBindings<Context> for ParentHandler<Context, H>
+impl<Params, InheritedParams> CliBindings<AnyContext> for ParentHandler<Params, InheritedParams>
 where
-    Context: crate::Context,
-    H: CliBindings<Context>,
-    H::Params: FromArgMatches + CommandFactory + Serialize,
-    H::InheritedParams: Serialize,
-    H::Ok: PrintCliResult<Context> + Serialize + DeserializeOwned,
-    RpcError: From<H::Err>,
+    Params: FromArgMatches + CommandFactory + Serialize,
+    InheritedParams: Serialize,
 {
     fn cli_command(&self) -> Command {
-        H::Params::command().subcommands(self.subcommands.iter().filter_map(|(method, handler)| {
-            match handler {
-                DynHandler::WithCli(h) => Some(h.cli_command().name(method)),
-                DynHandler::WithoutCli(_) => None,
-            }
-        }))
+        // Params::command().subcommands(self.subcommands.0.iter().filter_map(|(name, handlers)| {
+        //     handlers.iter().find_map(|(ctx_ty, handler)| {
+        //         if let DynHandler::WithCli(h) = handler {
+        //             h.cli_command()
+        //         }
+        //     })
+        // }))
+        todo!()
     }
     fn cli_parse(
         &self,
         matches: &ArgMatches,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        let (_, root_params) = self.handler.cli_parse(matches)?;
-        if let Some((sub, matches)) = matches.subcommand() {
-            if let Some((sub, DynHandler::WithCli(h))) = self.subcommands.get_key_value(sub) {
-                let (mut method, params) = h.cli_parse(matches)?;
-                method.push_front(*sub);
-                return Ok((
-                    method,
-                    combine(root_params, params).map_err(|e| {
-                        clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, e)
-                    })?,
-                ));
-            }
-        }
-        Ok((VecDeque::new(), root_params))
+        // let root_params = imbl_value::to_value(&Params::from_arg_matches(matches)?)
+        //     .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?;
+        // let (m, matches) = match matches.subcommand() {
+        //     Some((m, matches)) => (Some(m), matches),
+        //     None => (None, matches),
+        // };
+        // if let Some((SubcommandKey((_, m)), DynHandler::WithCli(h))) = self
+        //     .subcommands
+        //     .get_key_value(&(TypeId::of::<Context>(), m))
+        // {
+        //     let (mut method, params) = h.cli_parse(matches)?;
+        //     if let Some(m) = m {
+        //         method.push_front(*m);
+        //     }
+        //     return Ok((
+        //         method,
+        //         combine(root_params, params)
+        //             .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, e))?,
+        //     ));
+        // }
+        // Ok((VecDeque::new(), root_params))
+        todo!()
     }
     fn cli_display(
         &self,
@@ -617,39 +591,30 @@ where
             mut method,
             params,
             inherited_params,
-        }: HandleArgs<Context, Self>,
+        }: HandleArgs<AnyContext, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
-        if let Some(cmd) = method.pop_front() {
-            parent_method.push(cmd);
-            if let Some(DynHandler::WithCli(sub_handler)) = self.subcommands.get(cmd) {
-                sub_handler.cli_display(
-                    HandleAnyArgs {
-                        context,
-                        parent_method,
-                        method,
-                        params: imbl_value::to_value(&Flat(params, inherited_params))
-                            .map_err(invalid_params)?,
-                    },
-                    result,
-                )
-            } else {
-                Err(yajrc::METHOD_NOT_FOUND_ERROR)
-            }
-        } else {
-            self.handler
-                .cli_display(
-                    HandleArgs {
-                        context,
-                        parent_method,
-                        method,
-                        params,
-                        inherited_params,
-                    },
-                    imbl_value::from_value(result).map_err(internal_error)?,
-                )
-                .map_err(RpcError::from)
-        }
+        // let cmd = method.pop_front();
+        // if let Some(cmd) = cmd {
+        //     parent_method.push(cmd);
+        // }
+        // if let Some(DynHandler::WithCli(sub_handler)) =
+        //     self.subcommands.get(&(context.inner_type_id(), cmd))
+        // {
+        //     sub_handler.cli_display(
+        //         HandleAnyArgs {
+        //             context: AnyContext::new(context),
+        //             parent_method,
+        //             method,
+        //             params: imbl_value::to_value(&Flat(params, inherited_params))
+        //                 .map_err(invalid_params)?,
+        //         },
+        //         result,
+        //     )
+        // } else {
+        //     Err(yajrc::METHOD_NOT_FOUND_ERROR)
+        // }
+        todo!()
     }
 }
 
@@ -667,7 +632,7 @@ pub fn from_fn<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args> {
 
 impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, ()>
 where
-    Context: crate::Context,
+    Context: IntoContext,
     F: Fn() -> Result<T, E>,
 {
     type Params = NoParams;
@@ -681,7 +646,7 @@ where
 
 impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, (Context,)>
 where
-    Context: crate::Context,
+    Context: IntoContext,
     F: Fn(Context) -> Result<T, E>,
 {
     type Params = NoParams;
@@ -694,7 +659,7 @@ where
 }
 impl<Context, F, T, E, Params> Handler<Context> for FromFn<F, T, E, (Context, Params)>
 where
-    Context: crate::Context,
+    Context: IntoContext,
     F: Fn(Context, Params) -> Result<T, E>,
     Params: DeserializeOwned,
 {
@@ -712,7 +677,7 @@ where
 impl<Context, F, T, E, Params, InheritedParams> Handler<Context>
     for FromFn<F, T, E, (Context, Params, InheritedParams)>
 where
-    Context: crate::Context,
+    Context: IntoContext,
     F: Fn(Context, Params, InheritedParams) -> Result<T, E>,
     Params: DeserializeOwned,
     InheritedParams: DeserializeOwned,
