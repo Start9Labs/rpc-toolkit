@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
 use crate::context::{AnyContext, IntoContext};
-use crate::handler;
 use crate::util::{combine, internal_error, invalid_params, Flat};
 
 struct HandleAnyArgs {
@@ -52,19 +51,21 @@ trait HandleAny {
 }
 
 trait CliBindingsAny {
-    fn cli_command(&self) -> Command;
+    fn cli_command(&self, ctx_ty: TypeId) -> Command;
     fn cli_parse(
         &self,
         matches: &ArgMatches,
+        ctx_ty: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error>;
     fn cli_display(&self, handle_args: HandleAnyArgs, result: Value) -> Result<(), RpcError>;
 }
 
 pub trait CliBindings<Context: IntoContext>: Handler<Context> {
-    fn cli_command(&self) -> Command;
+    fn cli_command(&self, ctx_ty: TypeId) -> Command;
     fn cli_parse(
         &self,
         matches: &ArgMatches,
+        ctx_ty: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error>;
     fn cli_display(
         &self,
@@ -137,12 +138,13 @@ where
     H::Params: FromArgMatches + CommandFactory + Serialize,
     H: PrintCliResult<Context>,
 {
-    fn cli_command(&self) -> Command {
+    fn cli_command(&self, _: TypeId) -> Command {
         H::Params::command()
     }
     fn cli_parse(
         &self,
         matches: &ArgMatches,
+        _: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
         H::Params::from_arg_matches(matches).and_then(|a| {
             Ok((
@@ -241,14 +243,15 @@ where
     H::Ok: Serialize + DeserializeOwned,
     RpcError: From<H::Err>,
 {
-    fn cli_command(&self) -> Command {
-        self.handler.cli_command()
+    fn cli_command(&self, ctx_ty: TypeId) -> Command {
+        self.handler.cli_command(ctx_ty)
     }
     fn cli_parse(
         &self,
         matches: &ArgMatches,
+        ctx_ty: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.handler.cli_parse(matches)
+        self.handler.cli_parse(matches, ctx_ty)
     }
     fn cli_display(&self, handle_args: HandleAnyArgs, result: Value) -> Result<(), RpcError> {
         self.handler
@@ -546,42 +549,49 @@ where
     Params: FromArgMatches + CommandFactory + Serialize,
     InheritedParams: Serialize,
 {
-    fn cli_command(&self) -> Command {
-        // Params::command().subcommands(self.subcommands.0.iter().filter_map(|(name, handlers)| {
-        //     handlers.iter().find_map(|(ctx_ty, handler)| {
-        //         if let DynHandler::WithCli(h) = handler {
-        //             h.cli_command()
-        //         }
-        //     })
-        // }))
-        todo!()
+    fn cli_command(&self, ctx_ty: TypeId) -> Command {
+        let mut base = Params::command();
+        for (name, handlers) in &self.subcommands.0 {
+            if let (Name(Some(name)), Some(DynHandler::WithCli(handler))) = (
+                name,
+                if let Some(handler) = handlers.get(&Some(ctx_ty)) {
+                    Some(handler)
+                } else if let Some(handler) = handlers.get(&None) {
+                    Some(handler)
+                } else {
+                    None
+                },
+            ) {
+                base = base.subcommand(handler.cli_command(ctx_ty).name(name));
+            }
+        }
+        base
     }
     fn cli_parse(
         &self,
         matches: &ArgMatches,
+        ctx_ty: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        // let root_params = imbl_value::to_value(&Params::from_arg_matches(matches)?)
-        //     .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?;
-        // let (m, matches) = match matches.subcommand() {
-        //     Some((m, matches)) => (Some(m), matches),
-        //     None => (None, matches),
-        // };
-        // if let Some((SubcommandKey((_, m)), DynHandler::WithCli(h))) = self
-        //     .subcommands
-        //     .get_key_value(&(TypeId::of::<Context>(), m))
-        // {
-        //     let (mut method, params) = h.cli_parse(matches)?;
-        //     if let Some(m) = m {
-        //         method.push_front(*m);
-        //     }
-        //     return Ok((
-        //         method,
-        //         combine(root_params, params)
-        //             .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, e))?,
-        //     ));
-        // }
-        // Ok((VecDeque::new(), root_params))
-        todo!()
+        let root_params = imbl_value::to_value(&Params::from_arg_matches(matches)?)
+            .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?;
+        let (name, matches) = match matches.subcommand() {
+            Some((name, matches)) => (Some(name), matches),
+            None => (None, matches),
+        };
+        if let Some((Name(Some(name)), DynHandler::WithCli(handler))) =
+            self.subcommands.get(ctx_ty, name)
+        {
+            let (mut method, params) = handler.cli_parse(matches, ctx_ty)?;
+            method.push_front(name);
+
+            Ok((
+                method,
+                combine(root_params, params)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, e))?,
+            ))
+        } else {
+            Ok((VecDeque::new(), root_params))
+        }
     }
     fn cli_display(
         &self,
@@ -594,27 +604,26 @@ where
         }: HandleArgs<AnyContext, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
-        // let cmd = method.pop_front();
-        // if let Some(cmd) = cmd {
-        //     parent_method.push(cmd);
-        // }
-        // if let Some(DynHandler::WithCli(sub_handler)) =
-        //     self.subcommands.get(&(context.inner_type_id(), cmd))
-        // {
-        //     sub_handler.cli_display(
-        //         HandleAnyArgs {
-        //             context: AnyContext::new(context),
-        //             parent_method,
-        //             method,
-        //             params: imbl_value::to_value(&Flat(params, inherited_params))
-        //                 .map_err(invalid_params)?,
-        //         },
-        //         result,
-        //     )
-        // } else {
-        //     Err(yajrc::METHOD_NOT_FOUND_ERROR)
-        // }
-        todo!()
+        let cmd = method.pop_front();
+        if let Some(cmd) = cmd {
+            parent_method.push(cmd);
+        }
+        if let Some((_, DynHandler::WithCli(sub_handler))) =
+            self.subcommands.get(context.inner_type_id(), cmd)
+        {
+            sub_handler.cli_display(
+                HandleAnyArgs {
+                    context,
+                    parent_method,
+                    method,
+                    params: imbl_value::to_value(&Flat(params, inherited_params))
+                        .map_err(invalid_params)?,
+                },
+                result,
+            )
+        } else {
+            Err(yajrc::METHOD_NOT_FOUND_ERROR)
+        }
     }
 }
 
