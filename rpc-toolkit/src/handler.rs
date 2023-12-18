@@ -396,11 +396,7 @@ where
 }
 
 impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
-    pub fn subcommand<Context, H>(
-        mut self,
-        name: impl Into<Option<&'static str>>,
-        handler: H,
-    ) -> Self
+    pub fn subcommand<Context, H>(mut self, name: &'static str, handler: H) -> Self
     where
         Context: IntoContext,
         H: Handler<Context, InheritedParams = NoParams> + PrintCliResult<Context> + 'static,
@@ -421,11 +417,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
         );
         self
     }
-    pub fn subcommand_no_cli<Context, H>(
-        mut self,
-        name: impl Into<Option<&'static str>>,
-        handler: H,
-    ) -> Self
+    pub fn subcommand_no_cli<Context, H>(mut self, name: &'static str, handler: H) -> Self
     where
         Context: IntoContext,
         H: Handler<Context, InheritedParams = NoParams> + 'static,
@@ -451,7 +443,7 @@ where
 {
     pub fn subcommand_with_inherited<Context, H, F>(
         mut self,
-        name: impl Into<Option<&'static str>>,
+        name: &'static str,
         handler: H,
         inherit: F,
     ) -> Self
@@ -482,7 +474,7 @@ where
     }
     pub fn subcommand_with_inherited_no_cli<Context, H, F>(
         mut self,
-        name: impl Into<Option<&'static str>>,
+        name: &'static str,
         handler: H,
         inherit: F,
     ) -> Self
@@ -497,6 +489,55 @@ where
         self.subcommands.insert(
             handler.contexts(),
             name.into(),
+            DynHandler::WithoutCli(Arc::new(AnyHandler {
+                _ctx: PhantomData,
+                handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
+                    _phantom: PhantomData,
+                    handler,
+                    inherit,
+                },
+            })),
+        );
+        self
+    }
+    pub fn root_handler<Context, H, F>(mut self, handler: H, inherit: F) -> Self
+    where
+        Context: IntoContext,
+        H: Handler<Context, Params = NoParams> + PrintCliResult<Context> + 'static,
+        H::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
+        H::Ok: Serialize + DeserializeOwned,
+        RpcError: From<H::Err>,
+        F: Fn(Params, InheritedParams) -> H::InheritedParams + 'static,
+    {
+        self.subcommands.insert(
+            handler.contexts(),
+            None,
+            DynHandler::WithCli(Arc::new(AnyHandler {
+                _ctx: PhantomData,
+                handler: WithCliBindings {
+                    _ctx: PhantomData,
+                    handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
+                        _phantom: PhantomData,
+                        handler,
+                        inherit,
+                    },
+                },
+            })),
+        );
+        self
+    }
+    pub fn root_handler_no_cli<Context, H, F>(mut self, handler: H, inherit: F) -> Self
+    where
+        Context: IntoContext,
+        H: Handler<Context, Params = NoParams> + 'static,
+        H::Params: DeserializeOwned,
+        H::Ok: Serialize,
+        RpcError: From<H::Err>,
+        F: Fn(Params, InheritedParams) -> H::InheritedParams + 'static,
+    {
+        self.subcommands.insert(
+            handler.contexts(),
+            None,
             DynHandler::WithoutCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
                 handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
