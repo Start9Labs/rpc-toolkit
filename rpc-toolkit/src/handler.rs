@@ -396,7 +396,11 @@ where
 }
 
 impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
-    pub fn subcommand<Context, H>(mut self, name: Option<&'static str>, handler: H) -> Self
+    pub fn subcommand<Context, H>(
+        mut self,
+        name: impl Into<Option<&'static str>>,
+        handler: H,
+    ) -> Self
     where
         Context: IntoContext,
         H: Handler<Context, InheritedParams = NoParams> + PrintCliResult<Context> + 'static,
@@ -406,7 +410,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     {
         self.subcommands.insert(
             handler.contexts(),
-            name,
+            name.into(),
             DynHandler::WithCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
                 handler: WithCliBindings {
@@ -417,7 +421,11 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
         );
         self
     }
-    pub fn subcommand_no_cli<Context, H>(mut self, name: Option<&'static str>, handler: H) -> Self
+    pub fn subcommand_no_cli<Context, H>(
+        mut self,
+        name: impl Into<Option<&'static str>>,
+        handler: H,
+    ) -> Self
     where
         Context: IntoContext,
         H: Handler<Context, InheritedParams = NoParams> + 'static,
@@ -427,7 +435,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     {
         self.subcommands.insert(
             handler.contexts(),
-            name,
+            name.into(),
             DynHandler::WithoutCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
                 handler,
@@ -443,7 +451,7 @@ where
 {
     pub fn subcommand_with_inherited<Context, H, F>(
         mut self,
-        name: Option<&'static str>,
+        name: impl Into<Option<&'static str>>,
         handler: H,
         inherit: F,
     ) -> Self
@@ -457,7 +465,7 @@ where
     {
         self.subcommands.insert(
             handler.contexts(),
-            name,
+            name.into(),
             DynHandler::WithCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
                 handler: WithCliBindings {
@@ -474,7 +482,7 @@ where
     }
     pub fn subcommand_with_inherited_no_cli<Context, H, F>(
         mut self,
-        name: Option<&'static str>,
+        name: impl Into<Option<&'static str>>,
         handler: H,
         inherit: F,
     ) -> Self
@@ -488,7 +496,7 @@ where
     {
         self.subcommands.insert(
             handler.contexts(),
-            name,
+            name.into(),
             DynHandler::WithoutCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
                 handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
