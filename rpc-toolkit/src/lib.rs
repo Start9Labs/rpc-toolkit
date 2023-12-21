@@ -1,4 +1,4 @@
-// pub use cli::*;
+pub use cli::*;
 // pub use command::*;
 pub use context::*;
 pub use handler::*;
@@ -24,15 +24,11 @@ pub use handler::*;
 ///
 /// See also: [arg](rpc_toolkit_macro::arg), [context](rpc_toolkit_macro::context)
 pub use rpc_toolkit_macro::command;
-// pub use server::*;
+pub use server::*;
 pub use {clap, futures, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
 
-// mod cli;
-// mod command;
-mod handler;
-// pub mod command_helpers;
+mod cli;
 mod context;
-// mod metadata;
-// pub mod rpc_server_helpers;
-// mod server;
+mod handler;
+mod server;
 mod util;

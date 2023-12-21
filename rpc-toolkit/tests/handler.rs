@@ -69,10 +69,8 @@ impl Context for CliContext {
 // }
 
 fn make_api() -> ParentHandler<CliContext> {
-    ParentHandler::new().subcommand_no_cli(
-        Some("hello"),
-        from_fn(|_: CliContext| Ok::<_, RpcError>("world")),
-    )
+    ParentHandler::new()
+        .subcommand_no_cli("hello", from_fn(|_: CliContext| Ok::<_, RpcError>("world")))
 }
 
 pub fn internal_error(e: impl Display) -> RpcError {

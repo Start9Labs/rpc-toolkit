@@ -1,232 +1,82 @@
-use std::{ffi::OsString, marker::PhantomData};
+use std::any::TypeId;
+use std::ffi::OsString;
+use std::marker::PhantomData;
 
-use clap::{ArgMatches, CommandFactory, FromArgMatches};
-use futures::{future::BoxFuture, never::Never};
-use futures::{Future, FutureExt};
+use clap::{CommandFactory, FromArgMatches};
 use imbl_value::Value;
 use reqwest::{Client, Method};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::marker::PhantomData;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use url::Url;
 use yajrc::{Id, RpcError};
 
-use crate::{command::ParentCommand, CliBindings, EmptyHandler, HandleArgs, Handler, NoParams};
-// use crate::command::{AsyncCommand, DynCommand, LeafCommand, ParentInfo};
-use crate::util::{combine, internal_error, invalid_params, parse_error};
-// use crate::{CliBindings, SyncCommand};
+use crate::util::{internal_error, parse_error, Flat};
+use crate::{
+    AnyHandler, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, HandleArgs, Handler,
+    IntoContext, Name, ParentHandler,
+};
 
 type GenericRpcMethod<'a> = yajrc::GenericRpcMethod<&'a str, Value, Value>;
 type RpcRequest<'a> = yajrc::RpcRequest<GenericRpcMethod<'a>>;
 type RpcResponse<'a> = yajrc::RpcResponse<GenericRpcMethod<'static>>;
 
-// impl<Context: crate::Context> DynCommand<Context> {
-//     fn cli_app(&self) -> Option<clap::Command> {
-//         if let Some(cli) = &self.cli {
-//             Some(
-//                 cli.cmd
-//                     .clone()
-//                     .name(self.name)
-//                     .subcommands(self.subcommands.iter().filter_map(|c| c.cli_app())),
-//             )
-//         } else {
-//             None
-//         }
-//     }
-//     fn cmd_from_cli_matches(
-//         &self,
-//         matches: &ArgMatches,
-//         parent: ParentInfo<Value>,
-//     ) -> Result<(Vec<&'static str>, Value, &DynCommand<Context>), RpcError> {
-//         let params = combine(
-//             parent.params,
-//             (self
-//                 .cli
-//                 .as_ref()
-//                 .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-//                 .parser)(matches)?,
-//         )?;
-//         if let Some((cmd, matches)) = matches.subcommand() {
-//             let mut method = parent.method;
-//             method.push(self.name);
-//             self.subcommands
-//                 .iter()
-//                 .find(|c| c.name == cmd)
-//                 .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-//                 .cmd_from_cli_matches(matches, ParentInfo { method, params })
-//         } else {
-//             Ok((parent.method, params, self))
-//         }
-//     }
-// }
-
-struct RootCliHandler<Context: crate::Context, Config: CommandFactory + FromArgMatches>(
-    PhantomData<(Context, Config)>,
-);
-impl<Context: crate::Context, Config: CommandFactory + FromArgMatches> Handler<Context>
-    for RootCliHandler<Context, Config>
+pub struct CliApp<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches> {
+    _phantom: PhantomData<(Context, Config)>,
+    make_ctx: Box<dyn FnOnce(Config) -> Result<Context, RpcError> + Send + Sync>,
+    root_handler: ParentHandler,
+}
+impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
+    CliApp<Context, Config>
 {
-    type Params = NoParams;
-    type InheritedParams = NoParams;
-    type Ok = Never;
-    type Err = RpcError;
-    fn handle_sync(&self, _: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
-        Err(yajrc::METHOD_NOT_FOUND_ERROR)
-    }
-}
-impl<Context: crate::Context, Config: CommandFactory + FromArgMatches> CliBindings
-    for RootCliHandler<Context, Config>
-{
-    fn cli_command(&self) -> clap::Command {
-        Config::command()
-    }
-
-    fn cli_parse(
-        &self,
-        matches: &ArgMatches,
-    ) -> Result<(std::collections::VecDeque<&'static str>, Value), clap::Error> {
-    }
-
-    fn cli_display(
-        &self,
-        handle_args: HandleArgs<Context, Self>,
-        result: Self::Ok,
-    ) -> Result<(), Self::Err> {
-        todo!()
-    }
-}
-
-struct CliApp<Context: crate::Context, Config: CommandFactory + FromArgMatches>(
-    ParentCommand<Context, EmptyHandler<Config>>,
-);
-impl<Context: crate::Context> CliApp<Context> {
-    pub fn new(commands: Vec<DynCommand<Context>>) -> Self {
-        Self {
-            cli: CliBindings::from_parent::<Cmd>(),
-            commands,
-        }
-    }
-    fn cmd_from_cli_matches(
-        &self,
-        matches: &ArgMatches,
-    ) -> Result<(Vec<&'static str>, Value, &DynCommand<Context>), RpcError> {
-        if let Some((cmd, matches)) = matches.subcommand() {
-            Ok(self
-                .commands
-                .iter()
-                .find(|c| c.name == cmd)
-                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-                .cmd_from_cli_matches(
-                    matches,
-                    ParentInfo {
-                        method: Vec::new(),
-                        params: Value::Object(Default::default()),
-                    },
-                )?)
-        } else {
-            Err(yajrc::METHOD_NOT_FOUND_ERROR)
-        }
-    }
-}
-
-pub struct CliAppAsync<Context: crate::Context> {
-    app: CliApp<Context>,
-    make_ctx: Box<dyn FnOnce(Value) -> BoxFuture<'static, Result<Context, RpcError>> + Send>,
-}
-impl<Context: crate::Context> CliAppAsync<Context> {
-    pub fn new<
-        Cmd: FromArgMatches + CommandFactory + Serialize + DeserializeOwned + Send,
-        F: FnOnce(Cmd) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<Context, RpcError>> + Send,
-    >(
-        make_ctx: F,
-        commands: Vec<DynCommand<Context>>,
+    pub fn new<MakeCtx: FnOnce(Config) -> Result<Context, RpcError> + Send + Sync + 'static>(
+        make_ctx: MakeCtx,
+        root_handler: ParentHandler,
     ) -> Self {
         Self {
-            app: CliApp::new::<Cmd>(commands),
-            make_ctx: Box::new(|args| {
-                async { make_ctx(imbl_value::from_value(args).map_err(parse_error)?).await }.boxed()
-            }),
+            _phantom: PhantomData,
+            make_ctx: Box::new(make_ctx),
+            root_handler,
         }
     }
-}
-impl<Context: crate::Context + Clone> CliAppAsync<Context> {
-    pub async fn run(self, args: Vec<OsString>) -> Result<(), RpcError> {
-        let cmd = self
-            .app
-            .cli
-            .cmd
-            .clone()
-            .subcommands(self.app.commands.iter().filter_map(|c| c.cli_app()));
+    pub fn run(self, args: impl IntoIterator<Item = OsString>) -> Result<(), RpcError> {
+        let ctx_ty = TypeId::of::<Context>();
+        let mut cmd = Config::command();
+        for (name, handlers) in &self.root_handler.subcommands.0 {
+            if let (Name(Some(name)), Some(DynHandler::WithCli(handler))) = (
+                name,
+                if let Some(handler) = handlers.get(&Some(ctx_ty)) {
+                    Some(handler)
+                } else if let Some(handler) = handlers.get(&None) {
+                    Some(handler)
+                } else {
+                    None
+                },
+            ) {
+                cmd = cmd.subcommand(handler.cli_command(ctx_ty).name(name));
+            }
+        }
         let matches = cmd.get_matches_from(args);
-        let make_ctx_args = (self.app.cli.parser)(&matches)?;
-        let ctx = (self.make_ctx)(make_ctx_args).await?;
-        let (parent_method, params, cmd) = self.app.cmd_from_cli_matches(&matches)?;
-        let display = &cmd
-            .cli
-            .as_ref()
-            .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-            .display;
-        let res = (cmd
-            .implementation
-            .as_ref()
-            .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-            .async_impl)(ctx.clone(), parent_method.clone(), params.clone())
-        .await?;
-        if let Some(display) = display {
-            display(ctx, parent_method, params, res).map_err(parse_error)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-pub struct CliAppSync<Context: crate::Context> {
-    app: CliApp<Context>,
-    make_ctx: Box<dyn FnOnce(Value) -> Result<Context, RpcError> + Send>,
-}
-impl<Context: crate::Context> CliAppSync<Context> {
-    pub fn new<
-        Cmd: FromArgMatches + CommandFactory + Serialize + DeserializeOwned + Send,
-        F: FnOnce(Cmd) -> Result<Context, RpcError> + Send + 'static,
-    >(
-        make_ctx: F,
-        commands: Vec<DynCommand<Context>>,
-    ) -> Self {
-        Self {
-            app: CliApp::new::<Cmd>(commands),
-            make_ctx: Box::new(|args| make_ctx(imbl_value::from_value(args).map_err(parse_error)?)),
-        }
-    }
-}
-impl<Context: crate::Context + Clone> CliAppSync<Context> {
-    pub async fn run(self, args: Vec<OsString>) -> Result<(), RpcError> {
-        let cmd = self
-            .app
-            .cli
-            .cmd
-            .clone()
-            .subcommands(self.app.commands.iter().filter_map(|c| c.cli_app()));
-        let matches = cmd.get_matches_from(args);
-        let make_ctx_args = (self.app.cli.parser)(&matches)?;
-        let ctx = (self.make_ctx)(make_ctx_args)?;
-        let (parent_method, params, cmd) = self.app.cmd_from_cli_matches(&matches)?;
-        let display = &cmd
-            .cli
-            .as_ref()
-            .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-            .display;
-        let res = (cmd
-            .implementation
-            .as_ref()
-            .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-            .sync_impl)(ctx.clone(), parent_method.clone(), params.clone())?;
-        if let Some(display) = display {
-            display(ctx, parent_method, params, res).map_err(parse_error)
-        } else {
-            Ok(())
-        }
+        let config = Config::from_arg_matches(&matches)?;
+        let ctx = (self.make_ctx)(config)?;
+        let root_handler = AnyHandler::new(self.root_handler);
+        let (method, params) = root_handler.cli_parse(&matches, ctx_ty)?;
+        let res = root_handler.handle_sync(HandleAnyArgs {
+            context: ctx.clone().upcast(),
+            parent_method: Vec::new(),
+            method: method.clone(),
+            params: params.clone(),
+        })?;
+        root_handler.cli_display(
+            HandleAnyArgs {
+                context: ctx.upcast(),
+                parent_method: Vec::new(),
+                method,
+                params,
+            },
+            res,
+        )?;
+        Ok(())
     }
 }
 
@@ -285,6 +135,15 @@ pub trait CliContextHttp: crate::Context {
         }
     }
 }
+#[async_trait::async_trait]
+impl<T> CliContext for T
+where
+    T: CliContextHttp,
+{
+    async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+        <Self as CliContextHttp>::call_remote(&self, method, params).await
+    }
+}
 
 #[async_trait::async_trait]
 pub trait CliContextSocket: crate::Context {
@@ -318,66 +177,55 @@ pub trait CliContextSocket: crate::Context {
     }
 }
 
-pub trait RemoteCommand<Context: CliContext>: LeafCommand<Context> {}
-#[async_trait::async_trait]
-impl<T, Context> AsyncCommand<Context> for T
-where
-    T: RemoteCommand<Context> + Send + Serialize,
-    T::Parent: Serialize,
-    T::Ok: DeserializeOwned,
-    T::Err: From<RpcError>,
-    Context: CliContext + Send + 'static,
-{
-    async fn implementation(
-        self,
-        ctx: Context,
-        parent: ParentInfo<Self::Parent>,
-    ) -> Result<Self::Ok, Self::Err> {
-        let mut method = parent.method;
-        method.push(Self::NAME);
-        Ok(imbl_value::from_value(
-            ctx.call_remote(
-                &method.join("."),
-                combine(
-                    imbl_value::to_value(&self).map_err(invalid_params)?,
-                    imbl_value::to_value(&parent.params).map_err(invalid_params)?,
-                )
-                .map_err(invalid_params)?,
-            )
-            .await?,
-        )
-        .map_err(parse_error)?)
+#[derive(Debug, Default)]
+pub struct CallRemote<RemoteContext, RemoteHandler>(PhantomData<(RemoteContext, RemoteHandler)>);
+impl<RemoteContext, RemoteHandler> CallRemote<RemoteContext, RemoteHandler> {
+    pub fn new() -> Self {
+        Self(PhantomData)
     }
 }
-
-impl<T, Context> SyncCommand<Context> for T
+impl<RemoteContext, RemoteHandler> Clone for CallRemote<RemoteContext, RemoteHandler> {
+    fn clone(&self) -> Self {
+        Self(PhantomData)
+    }
+}
+#[async_trait::async_trait]
+impl<Context: CliContext, RemoteContext, RemoteHandler> Handler<Context>
+    for CallRemote<RemoteContext, RemoteHandler>
 where
-    T: RemoteCommand<Context> + Send + Serialize,
-    T::Parent: Serialize,
-    T::Ok: DeserializeOwned,
-    T::Err: From<RpcError>,
-    Context: CliContext + Send + 'static,
+    RemoteContext: IntoContext,
+    RemoteHandler: Handler<RemoteContext>,
+    RemoteHandler::Params: Serialize,
+    RemoteHandler::InheritedParams: Serialize,
+    RemoteHandler::Ok: DeserializeOwned,
+    RemoteHandler::Err: From<RpcError>,
 {
-    const BLOCKING: bool = true;
-    fn implementation(
-        self,
-        ctx: Context,
-        parent: ParentInfo<Self::Parent>,
+    type Params = RemoteHandler::Params;
+    type InheritedParams = RemoteHandler::InheritedParams;
+    type Ok = RemoteHandler::Ok;
+    type Err = RemoteHandler::Err;
+    async fn handle_async(
+        &self,
+        handle_args: HandleArgs<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        let mut method = parent.method;
-        method.push(Self::NAME);
-        Ok(imbl_value::from_value(
-            ctx.runtime().block_on(
-                ctx.call_remote(
-                    &method.join("."),
-                    combine(
-                        imbl_value::to_value(&self).map_err(invalid_params)?,
-                        imbl_value::to_value(&parent.params).map_err(invalid_params)?,
-                    )
-                    .map_err(invalid_params)?,
-                ),
-            )?,
-        )
-        .map_err(parse_error)?)
+        let full_method = handle_args
+            .parent_method
+            .into_iter()
+            .chain(handle_args.method)
+            .collect::<Vec<_>>();
+        match handle_args
+            .context
+            .call_remote(
+                &full_method.join("."),
+                imbl_value::to_value(&Flat(handle_args.params, handle_args.inherited_params))
+                    .map_err(parse_error)?,
+            )
+            .await
+        {
+            Ok(a) => imbl_value::from_value(a)
+                .map_err(internal_error)
+                .map_err(Self::Err::from),
+            Err(e) => Err(Self::Err::from(e)),
+        }
     }
 }

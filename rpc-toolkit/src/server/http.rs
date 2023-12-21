@@ -19,7 +19,7 @@ pub trait Middleware<Context: crate::Context> {
     async fn process_rpc_request(
         &self,
         prev: Self::ProcessHttpRequestResult,
-        metadata: &Context::Metadata,
+        // metadata: &Context::Metadata,
         req: &mut RpcRequest,
     ) -> Result<Self::ProcessRpcRequestResult, RpcResponse>;
     type ProcessRpcResponseResult;

@@ -1,13 +1,13 @@
-use std::borrow::Cow;
+use std::any::TypeId;
 use std::sync::Arc;
 
 use futures::future::{join_all, BoxFuture};
 use futures::{Future, FutureExt, Stream, StreamExt};
 use imbl_value::Value;
-use yajrc::{AnyParams, AnyRpcMethod, RpcError, RpcMethod};
+use yajrc::{RpcError, RpcMethod};
 
 use crate::util::{invalid_request, JobRunner};
-use crate::DynCommand;
+use crate::{AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
 
 type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
 type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
@@ -20,41 +20,21 @@ mod socket;
 pub use http::*;
 pub use socket::*;
 
-impl<Context: crate::Context> DynCommand<Context> {
-    fn cmd_from_method(
-        &self,
-        method: &[&str],
-        parent_method: Vec<&'static str>,
-    ) -> Result<(Vec<&'static str>, &DynCommand<Context>), RpcError> {
-        let mut ret_method = parent_method;
-        ret_method.push(self.name);
-        if let Some((cmd, rest)) = method.split_first() {
-            self.subcommands
-                .iter()
-                .find(|c| c.name == *cmd)
-                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-                .cmd_from_method(rest, ret_method)
-        } else {
-            Ok((ret_method, self))
-        }
-    }
-}
-
 pub struct Server<Context: crate::Context> {
-    commands: Vec<DynCommand<Context>>,
     make_ctx: Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
+    root_handler: Arc<AnyHandler<Context, ParentHandler>>,
 }
 impl<Context: crate::Context> Server<Context> {
     pub fn new<
-        F: Fn() -> Fut + Send + Sync + 'static,
+        MakeCtx: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Context, RpcError>> + Send + 'static,
     >(
-        commands: Vec<DynCommand<Context>>,
-        make_ctx: F,
+        make_ctx: MakeCtx,
+        root_handler: ParentHandler,
     ) -> Self {
         Server {
-            commands,
             make_ctx: Arc::new(move || make_ctx().boxed()),
+            root_handler: Arc::new(AnyHandler::new(root_handler)),
         }
     }
 
@@ -63,30 +43,22 @@ impl<Context: crate::Context> Server<Context> {
         method: &str,
         params: Value,
     ) -> impl Future<Output = Result<Value, RpcError>> + Send + 'static {
-        let from_self = (|| {
-            let method: Vec<_> = method.split(".").collect();
-            let (cmd, rest) = method.split_first().ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?;
-            let (method, cmd) = self
-                .commands
-                .iter()
-                .find(|c| c.name == *cmd)
-                .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-                .cmd_from_method(rest, Vec::new())?;
-            Ok::<_, RpcError>((
-                cmd.implementation
-                    .as_ref()
-                    .ok_or(yajrc::METHOD_NOT_FOUND_ERROR)?
-                    .async_impl
-                    .clone(),
-                self.make_ctx.clone(),
-                method,
-                params,
-            ))
-        })();
+        let (make_ctx, root_handler, method) = (
+            self.make_ctx.clone(),
+            self.root_handler.clone(),
+            self.root_handler
+                .method_from_dots(method, TypeId::of::<Context>()),
+        );
 
         async move {
-            let (implementation, make_ctx, method, params) = from_self?;
-            implementation(make_ctx().await?, method, params).await
+            root_handler
+                .handle_async(HandleAnyArgs {
+                    context: make_ctx().await?.upcast(),
+                    parent_method: Vec::new(),
+                    method: method.ok_or_else(|| yajrc::METHOD_NOT_FOUND_ERROR)?,
+                    params,
+                })
+                .await
         }
     }
 

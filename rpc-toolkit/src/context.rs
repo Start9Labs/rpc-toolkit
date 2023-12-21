@@ -5,14 +5,15 @@ use tokio::runtime::Handle;
 
 use crate::Handler;
 
-pub trait Context: Any + Send + 'static {
+pub trait Context: Any + Send + Sync + 'static {
     fn runtime(&self) -> Handle {
         Handle::current()
     }
 }
 
 #[allow(private_bounds)]
-pub trait IntoContext: sealed::Sealed + Any + Send + Sized + 'static {
+pub trait IntoContext: sealed::Sealed + Any + Send + Sync + Sized + 'static {
+    fn runtime(&self) -> Handle;
     fn type_ids_for<H: Handler<Self> + ?Sized>(handler: &H) -> Option<BTreeSet<TypeId>>;
     fn inner_type_id(&self) -> TypeId;
     fn upcast(self) -> AnyContext;
@@ -20,7 +21,10 @@ pub trait IntoContext: sealed::Sealed + Any + Send + Sized + 'static {
 }
 
 impl<C: Context + Sized> IntoContext for C {
-    fn type_ids_for<H: Handler<Self> + ?Sized>(handler: &H) -> Option<BTreeSet<TypeId>> {
+    fn runtime(&self) -> Handle {
+        <C as Context>::runtime(&self)
+    }
+    fn type_ids_for<H: Handler<Self> + ?Sized>(_: &H) -> Option<BTreeSet<TypeId>> {
         let mut set = BTreeSet::new();
         set.insert(TypeId::of::<C>());
         Some(set)
@@ -45,7 +49,13 @@ pub enum EitherContext<C1, C2> {
     C2(C2),
 }
 impl<C1: Context, C2: Context> IntoContext for EitherContext<C1, C2> {
-    fn type_ids_for<H: Handler<Self> + ?Sized>(handler: &H) -> Option<BTreeSet<TypeId>> {
+    fn runtime(&self) -> Handle {
+        match self {
+            Self::C1(a) => a.runtime(),
+            Self::C2(a) => a.runtime(),
+        }
+    }
+    fn type_ids_for<H: Handler<Self> + ?Sized>(_: &H) -> Option<BTreeSet<TypeId>> {
         let mut set = BTreeSet::new();
         set.insert(TypeId::of::<C1>());
         set.insert(TypeId::of::<C2>());
@@ -88,6 +98,9 @@ impl AnyContext {
 }
 
 impl IntoContext for AnyContext {
+    fn runtime(&self) -> Handle {
+        self.0.runtime()
+    }
     fn type_ids_for<H: Handler<Self> + ?Sized>(_: &H) -> Option<BTreeSet<TypeId>> {
         None
     }
