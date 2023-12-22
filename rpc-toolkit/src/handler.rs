@@ -99,123 +99,6 @@ pub trait PrintCliResult<Context: IntoContext>: Handler<Context> {
     ) -> Result<(), Self::Err>;
 }
 
-#[derive(Debug)]
-struct WithCliBindings<Context, H> {
-    _ctx: PhantomData<Context>,
-    handler: H,
-}
-impl<Context, H: Clone> Clone for WithCliBindings<Context, H> {
-    fn clone(&self) -> Self {
-        Self {
-            _ctx: PhantomData,
-            handler: self.handler.clone(),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl<Context, H> Handler<Context> for WithCliBindings<Context, H>
-where
-    Context: IntoContext,
-    H: Handler<Context>,
-{
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-    fn handle_sync(
-        &self,
-        HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandleArgs<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandleArgs<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler
-            .handle_async(HandleArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
-    }
-}
-
-impl<Context, H> CliBindings<Context> for WithCliBindings<Context, H>
-where
-    Context: IntoContext,
-    H: Handler<Context>,
-    H::Params: FromArgMatches + CommandFactory + Serialize,
-    H: PrintCliResult<Context>,
-{
-    fn cli_command(&self, _: TypeId) -> Command {
-        H::Params::command()
-    }
-    fn cli_parse(
-        &self,
-        matches: &ArgMatches,
-        _: TypeId,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        H::Params::from_arg_matches(matches).and_then(|a| {
-            Ok((
-                VecDeque::new(),
-                imbl_value::to_value(&a)
-                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
-            ))
-        })
-    }
-    fn cli_display(
-        &self,
-        HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandleArgs<Context, Self>,
-        result: Self::Ok,
-    ) -> Result<(), Self::Err> {
-        self.handler.print(
-            HandleArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            },
-            result,
-        )
-    }
-}
-
 pub(crate) trait HandleAnyWithCli: HandleAny + CliBindingsAny {}
 impl<T: HandleAny + CliBindingsAny> HandleAnyWithCli for T {}
 
@@ -514,16 +397,26 @@ where
     }
 }
 
-impl<Context, Params, InheritedParams, H, F> PrintCliResult<Context>
+impl<Context, Params, InheritedParams, H, F> CliBindings<Context>
     for InheritanceHandler<Context, Params, InheritedParams, H, F>
 where
     Context: IntoContext,
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
-    H: Handler<Context> + PrintCliResult<Context>,
+    H: CliBindings<Context>,
     F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
 {
-    fn print(
+    fn cli_command(&self, ctx_ty: TypeId) -> Command {
+        self.handler.cli_command(ctx_ty)
+    }
+    fn cli_parse(
+        &self,
+        matches: &ArgMatches,
+        ctx_ty: TypeId,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        self.handler.cli_parse(matches, ctx_ty)
+    }
+    fn cli_display(
         &self,
         HandleArgs {
             context,
@@ -535,7 +428,7 @@ where
         }: HandleArgs<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
-        self.handler.print(
+        self.handler.cli_display(
             HandleArgs {
                 context,
                 parent_method,
@@ -553,8 +446,8 @@ impl<Params: Send + Sync, InheritedParams: Send + Sync> ParentHandler<Params, In
     pub fn subcommand<Context, H>(mut self, name: &'static str, handler: H) -> Self
     where
         Context: IntoContext,
-        H: Handler<Context, InheritedParams = NoParams> + PrintCliResult<Context> + 'static,
-        H::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
+        H: CliBindings<Context, InheritedParams = NoParams> + 'static,
+        H::Params: DeserializeOwned,
         H::Ok: Serialize + DeserializeOwned,
         RpcError: From<H::Err>,
     {
@@ -563,10 +456,7 @@ impl<Params: Send + Sync, InheritedParams: Send + Sync> ParentHandler<Params, In
             name.into(),
             DynHandler::WithCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
-                handler: WithCliBindings {
-                    _ctx: PhantomData,
-                    handler,
-                },
+                handler,
             })),
         );
         self
@@ -603,8 +493,8 @@ where
     ) -> Self
     where
         Context: IntoContext,
-        H: Handler<Context> + PrintCliResult<Context> + 'static,
-        H::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
+        H: CliBindings<Context> + 'static,
+        H::Params: DeserializeOwned,
         H::Ok: Serialize + DeserializeOwned,
         RpcError: From<H::Err>,
         F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
@@ -614,13 +504,10 @@ where
             name.into(),
             DynHandler::WithCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
-                handler: WithCliBindings {
-                    _ctx: PhantomData,
-                    handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
-                        _phantom: PhantomData,
-                        handler,
-                        inherit,
-                    },
+                handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
+                    _phantom: PhantomData,
+                    handler,
+                    inherit,
                 },
             })),
         );
@@ -657,8 +544,8 @@ where
     pub fn root_handler<Context, H, F>(mut self, handler: H, inherit: F) -> Self
     where
         Context: IntoContext,
-        H: Handler<Context, Params = NoParams> + PrintCliResult<Context> + 'static,
-        H::Params: FromArgMatches + CommandFactory + Serialize + DeserializeOwned,
+        H: CliBindings<Context, Params = NoParams> + 'static,
+        H::Params: DeserializeOwned,
         H::Ok: Serialize + DeserializeOwned,
         RpcError: From<H::Err>,
         F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
@@ -668,13 +555,10 @@ where
             None,
             DynHandler::WithCli(Arc::new(AnyHandler {
                 _ctx: PhantomData,
-                handler: WithCliBindings {
-                    _ctx: PhantomData,
-                    handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
-                        _phantom: PhantomData,
-                        handler,
-                        inherit,
-                    },
+                handler: InheritanceHandler::<Context, Params, InheritedParams, H, F> {
+                    _phantom: PhantomData,
+                    handler,
+                    inherit,
                 },
             })),
         );
@@ -1158,5 +1042,103 @@ where
             ..
         } = handle_args;
         (self.function)(context, params, inherited_params).await
+    }
+}
+
+impl<Context, F, T, E, Args> CliBindings<Context> for FromFn<F, T, E, Args>
+where
+    Context: IntoContext,
+    Self: Handler<Context>,
+    Self::Params: FromArgMatches + CommandFactory + Serialize,
+    Self: PrintCliResult<Context>,
+{
+    fn cli_command(&self, _: TypeId) -> Command {
+        Self::Params::command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &ArgMatches,
+        _: TypeId,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        HandleArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandleArgs<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.print(
+            HandleArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            },
+            result,
+        )
+    }
+}
+
+impl<Context, F, Fut, T, E, Args> CliBindings<Context> for FromFnAsync<F, Fut, T, E, Args>
+where
+    Context: IntoContext,
+    Self: Handler<Context>,
+    Self::Params: FromArgMatches + CommandFactory + Serialize,
+    Self: PrintCliResult<Context>,
+{
+    fn cli_command(&self, _: TypeId) -> Command {
+        Self::Params::command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &ArgMatches,
+        _: TypeId,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        HandleArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandleArgs<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.print(
+            HandleArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            },
+            result,
+        )
     }
 }

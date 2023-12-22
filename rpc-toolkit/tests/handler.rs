@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use rpc_toolkit::{from_fn, from_fn_async, AnyContext, CliApp, Context, ParentHandler};
+use rpc_toolkit::{from_fn, from_fn_async, AnyContext, CliApp, Context, NoParams, ParentHandler};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::{Handle, Runtime};
 use tokio::sync::OnceCell;
