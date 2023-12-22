@@ -121,7 +121,11 @@ fn make_api() -> ParentHandler {
                 "donde",
                 from_fn(|c: CliContext, _: (), donde| {
                     Ok::<_, RpcError>(
-                        format!("Subcommand No Cli: Host {host}", host = c.host()).to_string(),
+                        format!(
+                            "Subcommand No Cli: Host {host} Donde = {donde}",
+                            host = c.host()
+                        )
+                        .to_string(),
                     )
                 }),
                 |InheritParams { donde }, _| donde,
