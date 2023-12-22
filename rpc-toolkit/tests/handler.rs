@@ -115,18 +115,18 @@ fn make_api() -> ParentHandler {
             }),
         )
         .subcommand("a_hello", from_fn_async(a_hello))
-    // .subcommand_with_inherited(
-    //     "inherited",
-    //     ParentHandler::<NoParams, NoParams>::new().subcommand_no_cli(
-    //         "echo_no_cli",
-    //         from_fn(|c: CliContext| {
-    //             Ok::<_, RpcError>(
-    //                 format!("Subcommand No Cli: Host {host}", host = c.host()).to_string(),
-    //             )
-    //         }),
-    //     ),
-    //     |InheritParams { donde }, _| InheritParams { donde },
-    // )
+        .subcommand(
+            "dondes",
+            ParentHandler::<InheritParams>::new().subcommand_with_inherited_no_cli(
+                "donde",
+                from_fn(|c: CliContext, _: (), donde| {
+                    Ok::<_, RpcError>(
+                        format!("Subcommand No Cli: Host {host}", host = c.host()).to_string(),
+                    )
+                }),
+                |InheritParams { donde }, _| donde,
+            ),
+        )
 }
 
 pub fn internal_error(e: impl Display) -> RpcError {
