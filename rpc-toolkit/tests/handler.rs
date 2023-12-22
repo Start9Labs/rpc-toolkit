@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use rpc_toolkit::{from_fn, Context, ParentHandler};
+use rpc_toolkit::{from_fn, AnyContext, CliApp, Context, ParentHandler};
 use serde::Deserialize;
 use tokio::runtime::{Handle, Runtime};
 use tokio::sync::OnceCell;
@@ -54,23 +54,25 @@ impl Context for CliContext {
     }
 }
 
-// fn make_cli() -> CliApp<CliConfig> {
-//     CliApp::new::<_, CliConfig>(|mut config| {
-//         config.load_rec()?;
-//         Ok(CliContext(Arc::new(CliContextSeed {
-//             host: config
-//                 .host
-//                 .unwrap_or_else("http://localhost:8080/rpc".parse().unwrap()),
-//             rt: OnceCell::new(),
-//         })))
-//     })
-//     .subcommands(make_api())
-//     .subcommands(ParentHandler::new().subcommand("hello", from_fn(|| Ok("world"))));
-// }
+fn make_cli() -> CliApp<CliContext, CliConfig> {
+    CliApp::new(
+        |mut config: CliConfig| {
+            config.load_rec()?;
+            Ok(CliContext(Arc::new(CliContextSeed {
+                host: config
+                    .host
+                    .map(|h| h.parse().unwrap())
+                    .unwrap_or_else(|| "http://localhost:8080/rpc".parse().unwrap()),
+                rt: OnceCell::new(),
+            })))
+        },
+        make_api(),
+    )
+}
 
-fn make_api() -> ParentHandler<CliContext> {
+fn make_api() -> ParentHandler {
     ParentHandler::new()
-        .subcommand_no_cli("hello", from_fn(|_: CliContext| Ok::<_, RpcError>("world")))
+        .subcommand::<AnyContext, _>("hello", from_fn(|| Ok::<_, RpcError>("world".to_owned())))
 }
 
 pub fn internal_error(e: impl Display) -> RpcError {

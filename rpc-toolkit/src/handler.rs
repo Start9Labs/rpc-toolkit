@@ -1,5 +1,6 @@
 use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fmt::Display;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -97,21 +98,6 @@ pub trait PrintCliResult<Context: IntoContext>: Handler<Context> {
         result: Self::Ok,
     ) -> Result<(), Self::Err>;
 }
-
-// impl<Context, H> PrintCliResult<Context> for H
-// where
-//     Context: IntoContext,
-//     H: Handler<Context>,
-//     H::Ok: Display,
-// {
-//     fn print(
-//         &self,
-//         handle_args: HandleArgs<Context, Self>,
-//         result: Self::Ok,
-//     ) -> Result<(), Self::Err> {
-//         Ok(println!("{result}"))
-//     }
-// }
 
 #[derive(Debug)]
 struct WithCliBindings<Context, H> {
@@ -906,6 +892,16 @@ impl<F: Clone, T, E, Args> Clone for FromFn<F, T, E, Args> {
         }
     }
 }
+impl<Context, F, T, E, Args> PrintCliResult<Context> for FromFn<F, T, E, Args>
+where
+    Context: IntoContext,
+    Self: Handler<Context>,
+    <Self as Handler<Context>>::Ok: Display,
+{
+    fn print(&self, _: HandleArgs<Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
+        Ok(println!("{result}"))
+    }
+}
 
 pub fn from_fn<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args> {
     FromFn {
@@ -933,6 +929,16 @@ impl<F: Clone, Fut, T, E, Args> Clone for FromFnAsync<F, Fut, T, E, Args> {
             _phantom: PhantomData,
             function: self.function.clone(),
         }
+    }
+}
+impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsync<F, Fut, T, E, Args>
+where
+    Context: IntoContext,
+    Self: Handler<Context>,
+    <Self as Handler<Context>>::Ok: Display,
+{
+    fn print(&self, _: HandleArgs<Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
+        Ok(println!("{result}"))
     }
 }
 
