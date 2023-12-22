@@ -83,10 +83,14 @@ fn make_api() -> ParentHandler {
     struct HelloParams {
         whom: String,
     }
+    #[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+    struct InheritParams {
+        donde: String,
+    }
     ParentHandler::new()
         .subcommand(
             "echo",
-            ParentHandler::new()
+            ParentHandler::<NoParams, NoParams>::new()
                 .subcommand_no_cli(
                     "echo_no_cli",
                     from_fn(|c: CliContext| {
@@ -111,6 +115,18 @@ fn make_api() -> ParentHandler {
             }),
         )
         .subcommand("a_hello", from_fn_async(a_hello))
+    // .subcommand_with_inherited(
+    //     "inherited",
+    //     ParentHandler::<NoParams, NoParams>::new().subcommand_no_cli(
+    //         "echo_no_cli",
+    //         from_fn(|c: CliContext| {
+    //             Ok::<_, RpcError>(
+    //                 format!("Subcommand No Cli: Host {host}", host = c.host()).to_string(),
+    //             )
+    //         }),
+    //     ),
+    //     |InheritParams { donde }, _| InheritParams { donde },
+    // )
 }
 
 pub fn internal_error(e: impl Display) -> RpcError {
