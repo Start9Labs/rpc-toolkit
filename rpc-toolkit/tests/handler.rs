@@ -90,7 +90,7 @@ fn make_api() -> ParentHandler {
     ParentHandler::new()
         .subcommand(
             "echo",
-            ParentHandler::<NoParams, NoParams>::new()
+            ParentHandler::<NoParams>::new()
                 .subcommand_no_cli(
                     "echo_no_cli",
                     from_fn(|c: CliContext| {
@@ -129,6 +129,34 @@ fn make_api() -> ParentHandler {
                     )
                 }),
                 |InheritParams { donde }, _| donde,
+            ),
+        )
+        .subcommand(
+            "fizz",
+            ParentHandler::<InheritParams>::new().root_handler(
+                from_fn(|c: CliContext, _, InheritParams { donde }| {
+                    Ok::<_, RpcError>(
+                        format!(
+                            "Subcommand No Cli: Host {host} Donde = {donde}",
+                            host = c.host(),
+                        )
+                        .to_string(),
+                    )
+                }),
+                |id, _| id,
+            ),
+        )
+        .subcommand(
+            "error",
+            ParentHandler::<InheritParams>::new().root_handler_no_cli(
+                from_fn(|c: CliContext, _, InheritParams { donde }| {
+                    Err::<String, _>(RpcError {
+                        code: 1,
+                        message: "This is an example message".into(),
+                        data: None,
+                    })
+                }),
+                |id, _| id,
             ),
         )
 }
