@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use rpc_toolkit::{from_fn, AnyContext, CliApp, Context, ParentHandler};
-use serde::Deserialize;
+use rpc_toolkit::{from_fn, from_fn_async, AnyContext, CliApp, Context, ParentHandler};
+use serde::{Deserialize, Serialize};
 use tokio::runtime::{Handle, Runtime};
 use tokio::sync::OnceCell;
 use url::Url;
@@ -71,8 +71,46 @@ fn make_cli() -> CliApp<CliContext, CliConfig> {
 }
 
 fn make_api() -> ParentHandler {
+    impl CliContext {
+        fn host(&self) -> &Url {
+            &self.0.host
+        }
+    }
+    async fn a_hello(_: CliContext) -> Result<String, RpcError> {
+        Ok::<_, RpcError>("Async Subcommand".to_string())
+    }
+    #[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+    struct HelloParams {
+        whom: String,
+    }
     ParentHandler::new()
-        .subcommand::<AnyContext, _>("hello", from_fn(|| Ok::<_, RpcError>("world".to_owned())))
+        .subcommand(
+            "echo",
+            ParentHandler::new()
+                .subcommand_no_cli(
+                    "echo_no_cli",
+                    from_fn(|c: CliContext| {
+                        Ok::<_, RpcError>(
+                            format!("Subcommand No Cli: Host {host}", host = c.host()).to_string(),
+                        )
+                    }),
+                )
+                .subcommand_no_cli(
+                    "echo_cli",
+                    from_fn(|c: CliContext| {
+                        Ok::<_, RpcError>(
+                            format!("Subcommand Cli: Host {host}", host = c.host()).to_string(),
+                        )
+                    }),
+                ),
+        )
+        .subcommand(
+            "hello",
+            from_fn(|_: CliContext, HelloParams { whom }: HelloParams| {
+                Ok::<_, RpcError>(format!("Hello {whom}").to_string())
+            }),
+        )
+        .subcommand("a_hello", from_fn_async(a_hello))
 }
 
 pub fn internal_error(e: impl Display) -> RpcError {
