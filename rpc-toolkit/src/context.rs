@@ -6,6 +6,9 @@ use tokio::runtime::Handle;
 use crate::Handler;
 
 pub trait Context: Any + Send + Sync + 'static {
+    fn inner_type_id(&self) -> TypeId {
+        <Self as Any>::type_id(&self)
+    }
     fn runtime(&self) -> Handle {
         Handle::current()
     }
@@ -36,7 +39,7 @@ impl<C: Context + Sized> IntoContext for C {
         AnyContext::new(self)
     }
     fn downcast(value: AnyContext) -> Result<Self, AnyContext> {
-        if value.0.type_id() == TypeId::of::<C>() {
+        if value.0.inner_type_id() == TypeId::of::<C>() {
             unsafe { Ok(value.downcast_unchecked::<C>()) }
         } else {
             Err(value)
@@ -90,10 +93,8 @@ impl AnyContext {
         Self(Box::new(value))
     }
     unsafe fn downcast_unchecked<C: Context>(self) -> C {
-        unsafe {
-            let raw: *mut dyn Context = Box::into_raw(self.0);
-            *Box::from_raw(raw as *mut C)
-        }
+        let raw: *mut dyn Context = Box::into_raw(self.0);
+        *Box::from_raw(raw as *mut C)
     }
 }
 
@@ -105,7 +106,7 @@ impl IntoContext for AnyContext {
         None
     }
     fn inner_type_id(&self) -> TypeId {
-        self.0.type_id()
+        self.0.inner_type_id()
     }
     fn downcast(value: AnyContext) -> Result<Self, AnyContext> {
         Ok(value)

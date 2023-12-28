@@ -5,17 +5,17 @@ use futures::{Future, Stream, StreamExt, TryStreamExt};
 use imbl_value::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, ToSocketAddrs, UnixListener};
-use tokio::sync::OnceCell;
+use tokio::sync::Notify;
 use yajrc::RpcError;
 
-use crate::util::{parse_error, JobRunner};
+use crate::util::{parse_error, JobRunner, StreamUntil};
 use crate::Server;
 
 #[derive(Clone)]
-pub struct ShutdownHandle(Arc<OnceCell<()>>);
+pub struct ShutdownHandle(Arc<Notify>);
 impl ShutdownHandle {
     pub fn shutdown(self) {
-        let _ = self.0.set(());
+        self.0.notify_one();
     }
 }
 
@@ -25,10 +25,10 @@ impl<Context: crate::Context> Server<Context> {
         listener: impl Stream<Item = std::io::Result<T>> + 'a,
         error_handler: impl Fn(std::io::Error) + Sync + 'a,
     ) -> (ShutdownHandle, impl Future<Output = ()> + 'a) {
-        let shutdown = Arc::new(OnceCell::new());
+        let shutdown = Arc::new(Notify::new());
         (ShutdownHandle(shutdown.clone()), async move {
             let mut runner = JobRunner::<std::io::Result<()>>::new();
-            let jobs = listener.map(|pipe| async {
+            let jobs = StreamUntil::new(listener, shutdown.notified()).map(|pipe| async {
                 let pipe = pipe?;
                 let (r, mut w) = tokio::io::split(pipe);
                 let stream = self.stream(

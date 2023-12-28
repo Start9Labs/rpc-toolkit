@@ -14,6 +14,7 @@ use yajrc::RpcError;
 
 use crate::context::{AnyContext, IntoContext};
 use crate::util::{combine, internal_error, invalid_params, Flat};
+use crate::{CallRemote, CallRemoteHandler};
 
 pub(crate) struct HandleAnyArgs {
     pub(crate) context: AnyContext,
@@ -24,7 +25,7 @@ pub(crate) struct HandleAnyArgs {
 impl HandleAnyArgs {
     fn downcast<Context: IntoContext, H>(self) -> Result<HandleArgs<Context, H>, imbl_value::Error>
     where
-        H: Handler<Context>,
+        H: HandlerTypes,
         H::Params: DeserializeOwned,
         H::InheritedParams: DeserializeOwned,
     {
@@ -49,7 +50,7 @@ impl HandleAnyArgs {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait HandleAny: Send + Sync {
+pub(crate) trait HandleAny: std::fmt::Debug + Send + Sync {
     fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
     async fn handle_async(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>>;
@@ -77,7 +78,7 @@ pub(crate) trait CliBindingsAny {
     fn cli_display(&self, handle_args: HandleAnyArgs, result: Value) -> Result<(), RpcError>;
 }
 
-pub trait CliBindings<Context: IntoContext>: Handler<Context> {
+pub trait CliBindings<Context: IntoContext>: HandlerTypes {
     fn cli_command(&self, ctx_ty: TypeId) -> Command;
     fn cli_parse(
         &self,
@@ -91,7 +92,7 @@ pub trait CliBindings<Context: IntoContext>: Handler<Context> {
     ) -> Result<(), Self::Err>;
 }
 
-pub trait PrintCliResult<Context: IntoContext>: Handler<Context> {
+pub trait PrintCliResult<Context: IntoContext>: HandlerTypes {
     fn print(
         &self,
         handle_args: HandleArgs<Context, Self>,
@@ -102,7 +103,7 @@ pub trait PrintCliResult<Context: IntoContext>: Handler<Context> {
 pub(crate) trait HandleAnyWithCli: HandleAny + CliBindingsAny {}
 impl<T: HandleAny + CliBindingsAny> HandleAnyWithCli for T {}
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum DynHandler {
     WithoutCli(Arc<dyn HandleAny>),
     WithCli(Arc<dyn HandleAnyWithCli>),
@@ -130,7 +131,7 @@ impl HandleAny for DynHandler {
 }
 
 #[derive(Debug, Clone)]
-pub struct HandleArgs<Context: IntoContext, H: Handler<Context> + ?Sized> {
+pub struct HandleArgs<Context: IntoContext, H: HandlerTypes + ?Sized> {
     pub context: Context,
     pub parent_method: Vec<&'static str>,
     pub method: VecDeque<&'static str>,
@@ -139,12 +140,17 @@ pub struct HandleArgs<Context: IntoContext, H: Handler<Context> + ?Sized> {
     pub raw_params: Value,
 }
 
-#[async_trait::async_trait]
-pub trait Handler<Context: IntoContext>: Clone + Send + Sync + 'static {
+pub trait HandlerTypes {
     type Params: Send + Sync;
     type InheritedParams: Send + Sync;
     type Ok: Send + Sync;
     type Err: Send + Sync;
+}
+
+#[async_trait::async_trait]
+pub trait Handler<Context: IntoContext>:
+    HandlerTypes + std::fmt::Debug + Clone + Send + Sync + 'static
+{
     fn handle_sync(&self, handle_args: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
         handle_args
             .context
@@ -196,6 +202,11 @@ impl<Context, H> AnyHandler<Context, H> {
             _ctx: PhantomData,
             handler,
         }
+    }
+}
+impl<Context, H: std::fmt::Debug> std::fmt::Debug for AnyHandler<Context, H> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("AnyHandler").field(&self.handler).finish()
     }
 }
 
@@ -271,7 +282,7 @@ impl<'a> std::borrow::Borrow<Option<&'a str>> for Name {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct SubcommandMap(pub(crate) BTreeMap<Name, BTreeMap<Option<TypeId>, DynHandler>>);
 impl SubcommandMap {
     fn insert(
@@ -324,6 +335,13 @@ impl<Params, InheritedParams> Clone for ParentHandler<Params, InheritedParams> {
         }
     }
 }
+impl<Params, InheritedParams> std::fmt::Debug for ParentHandler<Params, InheritedParams> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ParentHandler")
+            .field(&self.subcommands)
+            .finish()
+    }
+}
 
 struct InheritanceHandler<Context, Params, InheritedParams, H, F> {
     _phantom: PhantomData<(Context, Params, InheritedParams)>,
@@ -341,6 +359,28 @@ impl<Context, Params, InheritedParams, H: Clone, F: Clone> Clone
         }
     }
 }
+impl<Context, Params, InheritedParams, H: std::fmt::Debug, F> std::fmt::Debug
+    for InheritanceHandler<Context, Params, InheritedParams, H, F>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("InheritanceHandler")
+            .field(&self.handler)
+            .finish()
+    }
+}
+impl<Context, Params, InheritedParams, H, F> HandlerTypes
+    for InheritanceHandler<Context, Params, InheritedParams, H, F>
+where
+    Context: IntoContext,
+    H: HandlerTypes,
+    Params: Send + Sync,
+    InheritedParams: Send + Sync,
+{
+    type Params = H::Params;
+    type InheritedParams = Flat<Params, InheritedParams>;
+    type Ok = H::Ok;
+    type Err = H::Err;
+}
 #[async_trait::async_trait]
 impl<Context, Params, InheritedParams, H, F> Handler<Context>
     for InheritanceHandler<Context, Params, InheritedParams, H, F>
@@ -351,10 +391,6 @@ where
     H: Handler<Context>,
     F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
 {
-    type Params = H::Params;
-    type InheritedParams = Flat<Params, InheritedParams>;
-    type Ok = H::Ok;
-    type Err = H::Err;
     fn handle_sync(
         &self,
         HandleArgs {
@@ -446,7 +482,10 @@ impl<Params: Send + Sync, InheritedParams: Send + Sync> ParentHandler<Params, In
     pub fn subcommand<Context, H>(mut self, name: &'static str, handler: H) -> Self
     where
         Context: IntoContext,
-        H: CliBindings<Context, InheritedParams = NoParams> + 'static,
+        H: HandlerTypes<InheritedParams = NoParams>
+            + Handler<Context>
+            + CliBindings<Context>
+            + 'static,
         H::Params: DeserializeOwned,
         H::Ok: Serialize + DeserializeOwned,
         RpcError: From<H::Err>,
@@ -454,10 +493,42 @@ impl<Params: Send + Sync, InheritedParams: Send + Sync> ParentHandler<Params, In
         self.subcommands.insert(
             handler.contexts(),
             name.into(),
-            DynHandler::WithCli(Arc::new(AnyHandler {
-                _ctx: PhantomData,
-                handler,
-            })),
+            DynHandler::WithCli(Arc::new(AnyHandler::new(handler))),
+        );
+        self
+    }
+    pub fn subcommand_remote_cli<CliContext, ServerContext, H>(
+        mut self,
+        name: &'static str,
+        handler: H,
+    ) -> Self
+    where
+        ServerContext: IntoContext,
+        CliContext: IntoContext + CallRemote,
+        H: HandlerTypes<InheritedParams = NoParams>
+            + Handler<ServerContext>
+            + CliBindings<CliContext>
+            + 'static,
+        H::Params: Serialize + DeserializeOwned,
+        H::Ok: Serialize + DeserializeOwned,
+        RpcError: From<H::Err>,
+        H::Err: From<RpcError>,
+        CallRemoteHandler<ServerContext, H>: Handler<CliContext>,
+        <CallRemoteHandler<ServerContext, H> as HandlerTypes>::Ok: Serialize + DeserializeOwned,
+        <CallRemoteHandler<ServerContext, H> as HandlerTypes>::Params: Serialize + DeserializeOwned,
+        <CallRemoteHandler<ServerContext, H> as HandlerTypes>::InheritedParams: DeserializeOwned,
+        RpcError: From<<CallRemoteHandler<ServerContext, H> as HandlerTypes>::Err>,
+    {
+        self.subcommands.insert(
+            handler.contexts(),
+            name.into(),
+            DynHandler::WithoutCli(Arc::new(AnyHandler::new(handler.clone()))),
+        );
+        let call_remote = CallRemoteHandler::<ServerContext, H>::new(handler);
+        self.subcommands.insert(
+            call_remote.contexts(),
+            name.into(),
+            DynHandler::WithCli(Arc::new(AnyHandler::new(call_remote))),
         );
         self
     }
@@ -472,10 +543,7 @@ impl<Params: Send + Sync, InheritedParams: Send + Sync> ParentHandler<Params, In
         self.subcommands.insert(
             handler.contexts(),
             name.into(),
-            DynHandler::WithoutCli(Arc::new(AnyHandler {
-                _ctx: PhantomData,
-                handler,
-            })),
+            DynHandler::WithoutCli(Arc::new(AnyHandler::new(handler))),
         );
         self
     }
@@ -493,7 +561,7 @@ where
     ) -> Self
     where
         Context: IntoContext,
-        H: CliBindings<Context> + 'static,
+        H: Handler<Context> + CliBindings<Context> + 'static,
         H::Params: DeserializeOwned,
         H::Ok: Serialize + DeserializeOwned,
         RpcError: From<H::Err>,
@@ -510,6 +578,62 @@ where
                     inherit,
                 },
             })),
+        );
+        self
+    }
+    pub fn subcommand_with_inherited_remote_cli<CliContext, ServerContext, H, F>(
+        mut self,
+        name: &'static str,
+        handler: H,
+        inherit: F,
+    ) -> Self
+    where
+        ServerContext: IntoContext,
+        CliContext: IntoContext + CallRemote,
+        H: HandlerTypes + Handler<ServerContext> + CliBindings<CliContext> + 'static,
+        H::Params: Serialize + DeserializeOwned,
+        H::Ok: Serialize + DeserializeOwned,
+        RpcError: From<H::Err>,
+        H::Err: From<RpcError>,
+        CallRemoteHandler<ServerContext, H>:
+            Handler<CliContext, InheritedParams = H::InheritedParams>,
+        <CallRemoteHandler<ServerContext, H> as HandlerTypes>::Ok: Serialize + DeserializeOwned,
+        <CallRemoteHandler<ServerContext, H> as HandlerTypes>::Params: Serialize + DeserializeOwned,
+        <CallRemoteHandler<ServerContext, H> as HandlerTypes>::InheritedParams:
+            Serialize + DeserializeOwned,
+        RpcError: From<<CallRemoteHandler<ServerContext, H> as HandlerTypes>::Err>,
+        F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
+    {
+        self.subcommands.insert(
+            handler.contexts(),
+            name.into(),
+            DynHandler::WithoutCli(Arc::new(AnyHandler::new(InheritanceHandler::<
+                ServerContext,
+                Params,
+                InheritedParams,
+                H,
+                F,
+            > {
+                _phantom: PhantomData,
+                handler: handler.clone(),
+                inherit: inherit.clone(),
+            }))),
+        );
+        let call_remote = CallRemoteHandler::<ServerContext, H>::new(handler);
+        self.subcommands.insert(
+            call_remote.contexts(),
+            name.into(),
+            DynHandler::WithCli(Arc::new(AnyHandler::new(InheritanceHandler::<
+                CliContext,
+                Params,
+                InheritedParams,
+                CallRemoteHandler<ServerContext, H>,
+                F,
+            > {
+                _phantom: PhantomData,
+                handler: call_remote,
+                inherit,
+            }))),
         );
         self
     }
@@ -544,7 +668,7 @@ where
     pub fn root_handler<Context, H, F>(mut self, handler: H, inherit: F) -> Self
     where
         Context: IntoContext,
-        H: CliBindings<Context, Params = NoParams> + 'static,
+        H: HandlerTypes<Params = NoParams> + Handler<Context> + CliBindings<Context> + 'static,
         H::Params: DeserializeOwned,
         H::Ok: Serialize + DeserializeOwned,
         RpcError: From<H::Err>,
@@ -589,17 +713,23 @@ where
     }
 }
 
-#[async_trait::async_trait]
-impl<
-        Context: IntoContext,
-        Params: Serialize + Send + Sync + 'static,
-        InheritedParams: Serialize + Send + Sync + 'static,
-    > Handler<Context> for ParentHandler<Params, InheritedParams>
+impl<Params, InheritedParams> HandlerTypes for ParentHandler<Params, InheritedParams>
+where
+    Params: Send + Sync,
+    InheritedParams: Send + Sync,
 {
     type Params = Params;
     type InheritedParams = InheritedParams;
     type Ok = Value;
     type Err = RpcError;
+}
+#[async_trait::async_trait]
+impl<Context, Params, InheritedParams> Handler<Context> for ParentHandler<Params, InheritedParams>
+where
+    Context: IntoContext,
+    Params: Serialize + Send + Sync + 'static,
+    InheritedParams: Serialize + Send + Sync + 'static,
+{
     fn handle_sync(
         &self,
         HandleArgs {
@@ -614,7 +744,7 @@ impl<
         if let Some(cmd) = cmd {
             parent_method.push(cmd);
         }
-        if let Some((_, sub_handler)) = self.subcommands.get(context.inner_type_id(), cmd) {
+        if let Some((_, sub_handler)) = &self.subcommands.get(context.inner_type_id(), cmd) {
             sub_handler.handle_sync(HandleAnyArgs {
                 context: context.upcast(),
                 parent_method,
@@ -776,11 +906,18 @@ impl<F: Clone, T, E, Args> Clone for FromFn<F, T, E, Args> {
         }
     }
 }
+impl<F, T, E, Args> std::fmt::Debug for FromFn<F, T, E, Args> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FromFn")
+            .field("blocking", &self.blocking)
+            .finish()
+    }
+}
 impl<Context, F, T, E, Args> PrintCliResult<Context> for FromFn<F, T, E, Args>
 where
     Context: IntoContext,
-    Self: Handler<Context>,
-    <Self as Handler<Context>>::Ok: Display,
+    Self: HandlerTypes,
+    <Self as HandlerTypes>::Ok: Display,
 {
     fn print(&self, _: HandleArgs<Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
         Ok(println!("{result}"))
@@ -815,11 +952,16 @@ impl<F: Clone, Fut, T, E, Args> Clone for FromFnAsync<F, Fut, T, E, Args> {
         }
     }
 }
+impl<F, Fut, T, E, Args> std::fmt::Debug for FromFnAsync<F, Fut, T, E, Args> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FromFnAsync").finish()
+    }
+}
 impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsync<F, Fut, T, E, Args>
 where
     Context: IntoContext,
-    Self: Handler<Context>,
-    <Self as Handler<Context>>::Ok: Display,
+    Self: HandlerTypes,
+    <Self as HandlerTypes>::Ok: Display,
 {
     fn print(&self, _: HandleArgs<Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
         Ok(println!("{result}"))
@@ -833,10 +975,8 @@ pub fn from_fn_async<F, Fut, T, E, Args>(function: F) -> FromFnAsync<F, Fut, T, 
     }
 }
 
-#[async_trait::async_trait]
-impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, ()>
+impl<F, T, E> HandlerTypes for FromFn<F, T, E, ()>
 where
-    Context: IntoContext,
     F: Fn() -> Result<T, E> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -845,6 +985,15 @@ where
     type InheritedParams = NoParams;
     type Ok = T;
     type Err = E;
+}
+#[async_trait::async_trait]
+impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, ()>
+where
+    Context: IntoContext,
+    F: Fn() -> Result<T, E> + Send + Sync + Clone + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
     fn handle_sync(&self, _: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
         (self.function)()
     }
@@ -859,10 +1008,8 @@ where
         }
     }
 }
-#[async_trait::async_trait]
-impl<Context, F, Fut, T, E> Handler<Context> for FromFnAsync<F, Fut, T, E, ()>
+impl<F, Fut, T, E> HandlerTypes for FromFnAsync<F, Fut, T, E, ()>
 where
-    Context: IntoContext,
     F: Fn() -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
     T: Send + Sync + 'static,
@@ -872,13 +1019,22 @@ where
     type InheritedParams = NoParams;
     type Ok = T;
     type Err = E;
+}
+#[async_trait::async_trait]
+impl<Context, F, Fut, T, E> Handler<Context> for FromFnAsync<F, Fut, T, E, ()>
+where
+    Context: IntoContext,
+    F: Fn() -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
     async fn handle_async(&self, _: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
         (self.function)().await
     }
 }
 
-#[async_trait::async_trait]
-impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, (Context,)>
+impl<Context, F, T, E> HandlerTypes for FromFn<F, T, E, (Context,)>
 where
     Context: IntoContext,
     F: Fn(Context) -> Result<T, E> + Send + Sync + Clone + 'static,
@@ -889,6 +1045,15 @@ where
     type InheritedParams = NoParams;
     type Ok = T;
     type Err = E;
+}
+#[async_trait::async_trait]
+impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, (Context,)>
+where
+    Context: IntoContext,
+    F: Fn(Context) -> Result<T, E> + Send + Sync + Clone + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
     fn handle_sync(&self, handle_args: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args.context)
     }
@@ -903,8 +1068,7 @@ where
         }
     }
 }
-#[async_trait::async_trait]
-impl<Context, F, Fut, T, E> Handler<Context> for FromFnAsync<F, Fut, T, E, (Context,)>
+impl<Context, F, Fut, T, E> HandlerTypes for FromFnAsync<F, Fut, T, E, (Context,)>
 where
     Context: IntoContext,
     F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
@@ -916,6 +1080,16 @@ where
     type InheritedParams = NoParams;
     type Ok = T;
     type Err = E;
+}
+#[async_trait::async_trait]
+impl<Context, F, Fut, T, E> Handler<Context> for FromFnAsync<F, Fut, T, E, (Context,)>
+where
+    Context: IntoContext,
+    F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
     async fn handle_async(
         &self,
         handle_args: HandleArgs<Context, Self>,
@@ -924,8 +1098,7 @@ where
     }
 }
 
-#[async_trait::async_trait]
-impl<Context, F, T, E, Params> Handler<Context> for FromFn<F, T, E, (Context, Params)>
+impl<Context, F, T, E, Params> HandlerTypes for FromFn<F, T, E, (Context, Params)>
 where
     Context: IntoContext,
     F: Fn(Context, Params) -> Result<T, E> + Send + Sync + Clone + 'static,
@@ -937,6 +1110,16 @@ where
     type InheritedParams = NoParams;
     type Ok = T;
     type Err = E;
+}
+#[async_trait::async_trait]
+impl<Context, F, T, E, Params> Handler<Context> for FromFn<F, T, E, (Context, Params)>
+where
+    Context: IntoContext,
+    F: Fn(Context, Params) -> Result<T, E> + Send + Sync + Clone + 'static,
+    Params: DeserializeOwned + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
     fn handle_sync(&self, handle_args: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
         let HandleArgs {
             context, params, ..
@@ -954,9 +1137,8 @@ where
         }
     }
 }
-#[async_trait::async_trait]
-impl<Context, F, Fut, T, E, Params> Handler<Context>
-    for FromFnAsync<F, Fut, T, E, (Context, Params)>
+
+impl<Context, F, Fut, T, E, Params> HandlerTypes for FromFnAsync<F, Fut, T, E, (Context, Params)>
 where
     Context: IntoContext,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
@@ -969,6 +1151,18 @@ where
     type InheritedParams = NoParams;
     type Ok = T;
     type Err = E;
+}
+#[async_trait::async_trait]
+impl<Context, F, Fut, T, E, Params> Handler<Context>
+    for FromFnAsync<F, Fut, T, E, (Context, Params)>
+where
+    Context: IntoContext,
+    F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Params: DeserializeOwned + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
     async fn handle_async(
         &self,
         handle_args: HandleArgs<Context, Self>,
@@ -980,8 +1174,7 @@ where
     }
 }
 
-#[async_trait::async_trait]
-impl<Context, F, T, E, Params, InheritedParams> Handler<Context>
+impl<Context, F, T, E, Params, InheritedParams> HandlerTypes
     for FromFn<F, T, E, (Context, Params, InheritedParams)>
 where
     Context: IntoContext,
@@ -995,6 +1188,18 @@ where
     type InheritedParams = InheritedParams;
     type Ok = T;
     type Err = E;
+}
+#[async_trait::async_trait]
+impl<Context, F, T, E, Params, InheritedParams> Handler<Context>
+    for FromFn<F, T, E, (Context, Params, InheritedParams)>
+where
+    Context: IntoContext,
+    F: Fn(Context, Params, InheritedParams) -> Result<T, E> + Send + Sync + Clone + 'static,
+    Params: DeserializeOwned + Send + Sync + 'static,
+    InheritedParams: DeserializeOwned + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
     fn handle_sync(&self, handle_args: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
         let HandleArgs {
             context,
@@ -1015,8 +1220,8 @@ where
         }
     }
 }
-#[async_trait::async_trait]
-impl<Context, F, Fut, T, E, Params, InheritedParams> Handler<Context>
+
+impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerTypes
     for FromFnAsync<F, Fut, T, E, (Context, Params, InheritedParams)>
 where
     Context: IntoContext,
@@ -1031,6 +1236,19 @@ where
     type InheritedParams = InheritedParams;
     type Ok = T;
     type Err = E;
+}
+#[async_trait::async_trait]
+impl<Context, F, Fut, T, E, Params, InheritedParams> Handler<Context>
+    for FromFnAsync<F, Fut, T, E, (Context, Params, InheritedParams)>
+where
+    Context: IntoContext,
+    F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Params: DeserializeOwned + Send + Sync + 'static,
+    InheritedParams: DeserializeOwned + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
     async fn handle_async(
         &self,
         handle_args: HandleArgs<Context, Self>,
@@ -1048,7 +1266,7 @@ where
 impl<Context, F, T, E, Args> CliBindings<Context> for FromFn<F, T, E, Args>
 where
     Context: IntoContext,
-    Self: Handler<Context>,
+    Self: HandlerTypes,
     Self::Params: FromArgMatches + CommandFactory + Serialize,
     Self: PrintCliResult<Context>,
 {
@@ -1097,7 +1315,7 @@ where
 impl<Context, F, Fut, T, E, Args> CliBindings<Context> for FromFnAsync<F, Fut, T, E, Args>
 where
     Context: IntoContext,
-    Self: Handler<Context>,
+    Self: HandlerTypes,
     Self::Params: FromArgMatches + CommandFactory + Serialize,
     Self: PrintCliResult<Context>,
 {

@@ -1,119 +1,83 @@
-// use std::fmt::Display;
-// use std::str::FromStr;
-// use std::sync::Arc;
+use std::fmt::Display;
+use std::str::FromStr;
+use std::sync::Arc;
 
-// use futures::FutureExt;
-// use hyper::Request;
-// use rpc_toolkit::clap::Arg;
-// use rpc_toolkit::hyper::http::Error as HttpError;
-// use rpc_toolkit::hyper::{Body, Response};
-// use rpc_toolkit::rpc_server_helpers::{
-//     DynMiddlewareStage2, DynMiddlewareStage3, DynMiddlewareStage4,
-// };
-// use rpc_toolkit::serde::{Deserialize, Serialize};
-// use rpc_toolkit::url::Host;
-// use rpc_toolkit::yajrc::RpcError;
-// use rpc_toolkit::{command, rpc_server, run_cli, Context, Metadata};
+use futures::FutureExt;
+use hyper::Request;
+use rpc_toolkit::clap::Arg;
+use rpc_toolkit::hyper::http::Error as HttpError;
+use rpc_toolkit::hyper::Response;
+use rpc_toolkit::serde::{Deserialize, Serialize};
+use rpc_toolkit::url::Host;
+use rpc_toolkit::yajrc::RpcError;
+use rpc_toolkit::{command, Context};
 
-// #[derive(Debug, Clone)]
-// pub struct AppState(Arc<ConfigSeed>);
-// impl From<AppState> for () {
-//     fn from(_: AppState) -> Self {
-//         ()
-//     }
-// }
+#[derive(Debug, Clone)]
+pub struct AppState(Arc<ConfigSeed>);
+impl From<AppState> for () {
+    fn from(_: AppState) -> Self {
+        ()
+    }
+}
 
-// #[derive(Debug)]
-// pub struct ConfigSeed {
-//     host: Host,
-//     port: u16,
-// }
+#[derive(Debug)]
+pub struct ConfigSeed {
+    host: Host,
+    port: u16,
+}
 
-// impl Context for AppState {
-//     type Metadata = ();
-// }
+impl Context for AppState {}
 
-// fn test_string() -> String {
-//     "test".to_owned()
-// }
+#[command(
+    about = "Does the thing",
+    subcommands("dothething2::<U>", self(dothething_impl(async)))
+)]
+async fn dothething<U>(
+    #[context] _ctx: AppState,
+    #[arg(short = 'a')] arg1: Option<String>,
+    #[arg(short = 'b', default)] val: String,
+    #[arg(short = 'c', help = "I am the flag `c`!", default)] arg3: bool,
+    #[arg(stdin)] structured: U,
+) -> Result<(Option<String>, String, bool, U), RpcError>
+where
+    U: Serialize + for<'a> Deserialize<'a> + FromStr + Clone + 'static,
+    U::Err: Display,
+{
+    Ok((arg1, val, arg3, structured))
+}
 
-// #[command(
-//     about = "Does the thing",
-//     subcommands("dothething2::<U, E>", self(dothething_impl(async)))
-// )]
-// async fn dothething<
-//     U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E> + Clone + 'static,
-//     E: Display,
-// >(
-//     #[context] _ctx: AppState,
-//     #[arg(short = 'a')] arg1: Option<String>,
-//     #[arg(short = 'b', default = "test_string")] val: String,
-//     #[arg(short = 'c', help = "I am the flag `c`!", default)] arg3: bool,
-//     #[arg(stdin)] structured: U,
-// ) -> Result<(Option<String>, String, bool, U), RpcError> {
-//     Ok((arg1, val, arg3, structured))
-// }
+async fn dothething_impl<U: Serialize>(
+    ctx: AppState,
+    parent_data: (Option<String>, String, bool, U),
+) -> Result<String, RpcError> {
+    Ok(format!(
+        "{:?}, {:?}, {}, {}, {}",
+        ctx,
+        parent_data.0,
+        parent_data.1,
+        parent_data.2,
+        serde_json::to_string_pretty(&parent_data.3)?
+    ))
+}
 
-// async fn dothething_impl<U: Serialize>(
-//     ctx: AppState,
-//     parent_data: (Option<String>, String, bool, U),
-// ) -> Result<String, RpcError> {
-//     Ok(format!(
-//         "{:?}, {:?}, {}, {}, {}",
-//         ctx,
-//         parent_data.0,
-//         parent_data.1,
-//         parent_data.2,
-//         serde_json::to_string_pretty(&parent_data.3)?
-//     ))
-// }
-
-// #[command(about = "Does the thing")]
-// fn dothething2<U: Serialize + for<'a> Deserialize<'a> + FromStr<Err = E>, E: Display>(
-//     #[parent_data] parent_data: (Option<String>, String, bool, U),
-//     #[arg(stdin)] structured2: U,
-// ) -> Result<String, RpcError> {
-//     Ok(format!(
-//         "{:?}, {}, {}, {}, {}",
-//         parent_data.0,
-//         parent_data.1,
-//         parent_data.2,
-//         serde_json::to_string_pretty(&parent_data.3)?,
-//         serde_json::to_string_pretty(&structured2)?,
-//     ))
-// }
-
-// async fn cors<M: Metadata + 'static>(
-//     req: &mut Request<Body>,
-//     _: M,
-// ) -> Result<Result<DynMiddlewareStage2, Response<Body>>, HttpError> {
-//     if req.method() == hyper::Method::OPTIONS {
-//         Ok(Err(Response::builder()
-//             .header("Access-Control-Allow-Origin", "*")
-//             .body(Body::empty())?))
-//     } else {
-//         Ok(Ok(Box::new(|_, _| {
-//             async move {
-//                 let res: DynMiddlewareStage3 = Box::new(|_, _| {
-//                     async move {
-//                         let res: DynMiddlewareStage4 = Box::new(|res| {
-//                             async move {
-//                                 res.headers_mut()
-//                                     .insert("Access-Control-Allow-Origin", "*".parse()?);
-//                                 Ok::<_, HttpError>(())
-//                             }
-//                             .boxed()
-//                         });
-//                         Ok::<_, HttpError>(Ok(res))
-//                     }
-//                     .boxed()
-//                 });
-//                 Ok::<_, HttpError>(Ok(res))
-//             }
-//             .boxed()
-//         })))
-//     }
-// }
+#[command(about = "Does the thing")]
+fn dothething2<U>(
+    #[parent_data] parent_data: (Option<String>, String, bool, U),
+    #[arg(stdin)] structured2: U,
+) -> Result<String, RpcError>
+where
+    U: Serialize + for<'a> Deserialize<'a> + FromStr + Clone + 'static,
+    U::Err: Display,
+{
+    Ok(format!(
+        "{:?}, {}, {}, {}, {}",
+        parent_data.0,
+        parent_data.1,
+        parent_data.2,
+        serde_json::to_string_pretty(&parent_data.3)?,
+        serde_json::to_string_pretty(&structured2)?,
+    ))
+}
 
 // #[tokio::test]
 // async fn test_rpc() {

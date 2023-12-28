@@ -7,7 +7,7 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
     for arg in args {
         match arg {
             NestedMeta::Meta(Meta::Path(p)) if p.is_ident("macro_debug") => {
-                opt.common().macro_debug = true;
+                opt.common().macro_debug = Some(p);
             }
             NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("subcommands") => {
                 let inner = opt.to_parent()?;
@@ -536,25 +536,20 @@ pub fn parse_command_attr(args: AttributeArgs) -> Result<Options> {
 
 pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
     let arg_span = arg.span();
+    let meta = attr.parse_meta()?;
     let mut opt = ArgOptions {
         ty: *arg.ty,
-        optional: false,
-        check_is_present: false,
-        help: None,
         name: match *arg.pat {
             Pat::Ident(i) => Some(i.ident),
             _ => None,
         },
         rename: None,
-        short: None,
-        long: None,
         parse: None,
-        default: None,
-        count: None,
-        multiple: None,
         stdin: None,
+        default: None,
+        clap_attr: Vec::new(),
     };
-    match attr.parse_meta()? {
+    match meta {
         Meta::List(list) => {
             for arg in list.nested {
                 match arg {
@@ -591,34 +586,10 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                         return Err(Error::new(nv.path.span(), "`parse` cannot be assigned to"));
                     }
                     NestedMeta::Meta(Meta::Path(p)) if p.is_ident("stdin") => {
-                        if opt.short.is_some() {
+                        if !opt.clap_attr.is_empty() {
                             return Err(Error::new(
                                 p.span(),
-                                "`stdin` and `short` are mutually exclusive",
-                            ));
-                        }
-                        if opt.long.is_some() {
-                            return Err(Error::new(
-                                p.span(),
-                                "`stdin` and `long` are mutually exclusive",
-                            ));
-                        }
-                        if opt.help.is_some() {
-                            return Err(Error::new(
-                                p.span(),
-                                "`stdin` and `help` are mutually exclusive",
-                            ));
-                        }
-                        if opt.count.is_some() {
-                            return Err(Error::new(
-                                p.span(),
-                                "`stdin` and `count` are mutually exclusive",
-                            ));
-                        }
-                        if opt.multiple.is_some() {
-                            return Err(Error::new(
-                                p.span(),
-                                "`stdin` and `multiple` are mutually exclusive",
+                                "`stdin` and clap parser attributes are mutually exclusive",
                             ));
                         }
                         opt.stdin = Some(p);
@@ -632,79 +603,6 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                     NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("stdin") => {
                         return Err(Error::new(nv.path.span(), "`stdin` cannot be assigned to"));
                     }
-                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("count") => {
-                        if opt.stdin.is_some() {
-                            return Err(Error::new(
-                                p.span(),
-                                "`stdin` and `count` are mutually exclusive",
-                            ));
-                        }
-                        if opt.multiple.is_some() {
-                            return Err(Error::new(
-                                p.span(),
-                                "`count` and `multiple` are mutually exclusive",
-                            ));
-                        }
-                        opt.count = Some(p);
-                    }
-                    NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("count") => {
-                        return Err(Error::new(
-                            list.path.span(),
-                            "`count` does not take any arguments",
-                        ));
-                    }
-                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("count") => {
-                        return Err(Error::new(nv.path.span(), "`count` cannot be assigned to"));
-                    }
-                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("multiple") => {
-                        if opt.stdin.is_some() {
-                            return Err(Error::new(
-                                p.span(),
-                                "`stdin` and `multiple` are mutually exclusive",
-                            ));
-                        }
-                        if opt.count.is_some() {
-                            return Err(Error::new(
-                                p.span(),
-                                "`count` and `multiple` are mutually exclusive",
-                            ));
-                        }
-                        opt.multiple = Some(p);
-                    }
-                    NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("multiple") => {
-                        return Err(Error::new(
-                            list.path.span(),
-                            "`multiple` does not take any arguments",
-                        ));
-                    }
-                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("count") => {
-                        return Err(Error::new(nv.path.span(), "`count` cannot be assigned to"));
-                    }
-                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("help") => {
-                        if let Lit::Str(help) = nv.lit {
-                            if opt.help.is_some() {
-                                return Err(Error::new(help.span(), "duplicate argument `help`"));
-                            }
-                            if opt.stdin.is_some() {
-                                return Err(Error::new(
-                                    help.span(),
-                                    "`stdin` and `help` are mutually exclusive",
-                                ));
-                            }
-                            opt.help = Some(help);
-                        } else {
-                            return Err(Error::new(nv.lit.span(), "help message must be a string"));
-                        }
-                    }
-                    NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("help") => {
-                        return Err(Error::new(
-                            list.path.span(),
-                            "`help` does not take any arguments",
-                        ));
-                    }
-                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("help") => {
-                        return Err(Error::new(p.span(), "`help` must be assigned to"));
-                    }
                     NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("rename") => {
                         if let Lit::Str(rename) = nv.lit {
                             if opt.rename.is_some() {
@@ -713,6 +611,12 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                                     "duplicate argument `rename`",
                                 ));
                             }
+                            opt.clap_attr
+                                .push(NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                                    path: Path::from(Ident::new("name", nv.path.span())),
+                                    eq_token: nv.eq_token,
+                                    lit: Lit::Str(rename.clone()),
+                                })));
                             opt.rename = Some(rename);
                         } else {
                             return Err(Error::new(nv.lit.span(), "`rename` must be a string"));
@@ -727,68 +631,8 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                     NestedMeta::Meta(Meta::Path(p)) if p.is_ident("rename") => {
                         return Err(Error::new(p.span(), "`rename` must be assigned to"));
                     }
-                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("short") => {
-                        if let Lit::Char(short) = nv.lit {
-                            if opt.short.is_some() {
-                                return Err(Error::new(short.span(), "duplicate argument `short`"));
-                            }
-                            if opt.stdin.is_some() {
-                                return Err(Error::new(
-                                    short.span(),
-                                    "`stdin` and `short` are mutually exclusive",
-                                ));
-                            }
-                            opt.short = Some(short);
-                        } else {
-                            return Err(Error::new(nv.lit.span(), "`short` must be a char"));
-                        }
-                    }
-                    NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("short") => {
-                        return Err(Error::new(
-                            list.path.span(),
-                            "`short` does not take any arguments",
-                        ));
-                    }
-                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("short") => {
-                        return Err(Error::new(p.span(), "`short` must be assigned to"));
-                    }
-                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("long") => {
-                        if let Lit::Str(long) = nv.lit {
-                            if opt.long.is_some() {
-                                return Err(Error::new(long.span(), "duplicate argument `long`"));
-                            }
-                            if opt.stdin.is_some() {
-                                return Err(Error::new(
-                                    long.span(),
-                                    "`stdin` and `long` are mutually exclusive",
-                                ));
-                            }
-                            opt.long = Some(long);
-                        } else {
-                            return Err(Error::new(nv.lit.span(), "`long` must be a string"));
-                        }
-                    }
-                    NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("long") => {
-                        return Err(Error::new(
-                            list.path.span(),
-                            "`long` does not take any arguments",
-                        ));
-                    }
-                    NestedMeta::Meta(Meta::Path(p)) if p.is_ident("long") => {
-                        return Err(Error::new(p.span(), "`long` must be assigned to"));
-                    }
                     NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("default") => {
-                        if let Lit::Str(default) = nv.lit {
-                            if opt.default.is_some() {
-                                return Err(Error::new(
-                                    default.span(),
-                                    "duplicate argument `default`",
-                                ));
-                            }
-                            opt.default = Some(Some(default));
-                        } else {
-                            return Err(Error::new(nv.lit.span(), "`default` must be a string"));
-                        }
+                        return Err(Error::new(nv.lit.span(), "`default` cannot be assigned to"));
                     }
                     NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("default") => {
                         return Err(Error::new(
@@ -797,13 +641,21 @@ pub fn parse_arg_attr(attr: Attribute, arg: PatType) -> Result<ArgOptions> {
                         ));
                     }
                     NestedMeta::Meta(Meta::Path(p)) if p.is_ident("default") => {
-                        if opt.default.is_some() {
-                            return Err(Error::new(p.span(), "duplicate argument `default`"));
-                        }
-                        opt.default = Some(None);
+                        opt.clap_attr
+                            .push(NestedMeta::Meta(Meta::Path(Path::from(Ident::new(
+                                "default_value_t",
+                                p.span(),
+                            )))));
+                        opt.default = Some(p);
                     }
-                    _ => {
-                        return Err(Error::new(arg.span(), "unknown argument"));
+                    unknown => {
+                        if opt.stdin.is_some() {
+                            return Err(Error::new(
+                                unknown.span(),
+                                "`stdin` and clap parser attributes are mutually exclusive",
+                            ));
+                        }
+                        opt.clap_attr.push(unknown);
                     }
                 }
             }

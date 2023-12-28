@@ -1,13 +1,19 @@
+use std::any::TypeId;
+use std::ffi::OsString;
 use std::fmt::Display;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
-use rpc_toolkit::{from_fn, from_fn_async, AnyContext, CliApp, Context, NoParams, ParentHandler};
+use futures::future::ready;
+use imbl_value::Value;
+use rpc_toolkit::{
+    call_remote_socket, from_fn, from_fn_async, AnyContext, CallRemote, CliApp, Context, NoParams,
+    ParentHandler, Server,
+};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::{Handle, Runtime};
-use tokio::sync::OnceCell;
-use url::Url;
+use tokio::sync::{Mutex, OnceCell};
 use yajrc::RpcError;
 
 #[derive(Parser, Deserialize)]
@@ -18,7 +24,9 @@ use yajrc::RpcError;
     about = "This is a test cli application."
 )]
 struct CliConfig {
-    host: Option<String>,
+    #[arg(long = "host")]
+    host: Option<PathBuf>,
+    #[arg(short = 'c', long = "config")]
     config: Option<PathBuf>,
 }
 impl CliConfig {
@@ -40,7 +48,7 @@ impl CliConfig {
 }
 
 struct CliContextSeed {
-    host: Url,
+    host: PathBuf,
     rt: OnceCell<Runtime>,
 }
 #[derive(Clone)]
@@ -53,6 +61,17 @@ impl Context for CliContext {
         self.0.rt.get().unwrap().handle().clone()
     }
 }
+#[async_trait::async_trait]
+impl CallRemote for CliContext {
+    async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+        call_remote_socket(
+            tokio::net::UnixStream::connect(&self.0.host).await.unwrap(),
+            method,
+            params,
+        )
+        .await
+    }
+}
 
 fn make_cli() -> CliApp<CliContext, CliConfig> {
     CliApp::new(
@@ -61,8 +80,7 @@ fn make_cli() -> CliApp<CliContext, CliConfig> {
             Ok(CliContext(Arc::new(CliContextSeed {
                 host: config
                     .host
-                    .map(|h| h.parse().unwrap())
-                    .unwrap_or_else(|| "http://localhost:8080/rpc".parse().unwrap()),
+                    .unwrap_or_else(|| Path::new("./rpc.sock").to_owned()),
                 rt: OnceCell::new(),
             })))
         },
@@ -70,14 +88,28 @@ fn make_cli() -> CliApp<CliContext, CliConfig> {
     )
 }
 
+struct ServerContextSeed {
+    state: Mutex<Value>,
+}
+
+#[derive(Clone)]
+struct ServerContext(Arc<ServerContextSeed>);
+impl Context for ServerContext {}
+
+fn make_server() -> Server<ServerContext> {
+    let ctx = ServerContext(Arc::new(ServerContextSeed {
+        state: Mutex::new(Value::Null),
+    }));
+    Server::new(move || ready(Ok(ctx.clone())), make_api())
+}
+
 fn make_api() -> ParentHandler {
-    impl CliContext {
-        fn host(&self) -> &Url {
-            &self.0.host
-        }
-    }
     async fn a_hello(_: CliContext) -> Result<String, RpcError> {
         Ok::<_, RpcError>("Async Subcommand".to_string())
+    }
+    #[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+    struct EchoParams {
+        next: String,
     }
     #[derive(Debug, Clone, Deserialize, Serialize, Parser)]
     struct HelloParams {
@@ -88,29 +120,20 @@ fn make_api() -> ParentHandler {
         donde: String,
     }
     ParentHandler::new()
-        .subcommand(
+        .subcommand_remote_cli::<CliContext, _, _>(
             "echo",
-            ParentHandler::<NoParams>::new()
-                .subcommand_no_cli(
-                    "echo_no_cli",
-                    from_fn(|c: CliContext| {
-                        Ok::<_, RpcError>(
-                            format!("Subcommand No Cli: Host {host}", host = c.host()).to_string(),
-                        )
-                    }),
-                )
-                .subcommand_no_cli(
-                    "echo_cli",
-                    from_fn(|c: CliContext| {
-                        Ok::<_, RpcError>(
-                            format!("Subcommand Cli: Host {host}", host = c.host()).to_string(),
-                        )
-                    }),
-                ),
+            from_fn_async(
+                |c: ServerContext, EchoParams { next }: EchoParams| async move {
+                    Ok::<_, RpcError>(std::mem::replace(
+                        &mut *c.0.state.lock().await,
+                        Value::String(Arc::new(next)),
+                    ))
+                },
+            ),
         )
         .subcommand(
             "hello",
-            from_fn(|_: CliContext, HelloParams { whom }: HelloParams| {
+            from_fn(|_: AnyContext, HelloParams { whom }: HelloParams| {
                 Ok::<_, RpcError>(format!("Hello {whom}").to_string())
             }),
         )
@@ -123,7 +146,7 @@ fn make_api() -> ParentHandler {
                     Ok::<_, RpcError>(
                         format!(
                             "Subcommand No Cli: Host {host} Donde = {donde}",
-                            host = c.host()
+                            host = c.0.host.display()
                         )
                         .to_string(),
                     )
@@ -137,8 +160,8 @@ fn make_api() -> ParentHandler {
                 from_fn(|c: CliContext, _, InheritParams { donde }| {
                     Ok::<_, RpcError>(
                         format!(
-                            "Subcommand No Cli: Host {host} Donde = {donde}",
-                            host = c.host(),
+                            "Root Command: Host {host} Donde = {donde}",
+                            host = c.0.host.display(),
                         )
                         .to_string(),
                     )
@@ -166,4 +189,64 @@ pub fn internal_error(e: impl Display) -> RpcError {
         data: Some(e.to_string().into()),
         ..yajrc::INTERNAL_ERROR
     }
+}
+
+#[test]
+fn test_cli() {
+    make_cli()
+        .run(
+            ["test-cli", "hello", "me"]
+                .into_iter()
+                .map(|s| OsString::from(s)),
+        )
+        .unwrap();
+    make_cli()
+        .run(
+            ["test-cli", "fizz", "buzz"]
+                .into_iter()
+                .map(|s| OsString::from(s)),
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_server() {
+    let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("rpc.sock");
+    tokio::fs::remove_file(&path).await.unwrap_or_default();
+    let server = make_server();
+    let (shutdown, fut) = server
+        .run_unix(path.clone(), |err| eprintln!("IO Error: {err}"))
+        .unwrap();
+    tokio::join!(
+        tokio::task::spawn_blocking(move || {
+            make_cli()
+                .run(
+                    [
+                        "test-cli",
+                        &format!("--host={}", path.display()),
+                        "echo",
+                        "foo",
+                    ]
+                    .into_iter()
+                    .map(|s| OsString::from(s)),
+                )
+                .unwrap();
+            make_cli()
+                .run(
+                    [
+                        "test-cli",
+                        &format!("--host={}", path.display()),
+                        "echo",
+                        "bar",
+                    ]
+                    .into_iter()
+                    .map(|s| OsString::from(s)),
+                )
+                .unwrap();
+            shutdown.shutdown()
+        }),
+        fut
+    )
+    .0
+    .unwrap();
 }

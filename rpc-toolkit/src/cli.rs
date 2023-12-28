@@ -13,8 +13,8 @@ use yajrc::{Id, RpcError};
 
 use crate::util::{internal_error, parse_error, Flat};
 use crate::{
-    AnyHandler, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, HandleArgs, Handler,
-    IntoContext, Name, ParentHandler,
+    AnyHandler, CliBindings, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, HandleArgs,
+    Handler, HandlerTypes, IntoContext, Name, ParentHandler,
 };
 
 type GenericRpcMethod<'a> = yajrc::GenericRpcMethod<&'a str, Value, Value>;
@@ -81,120 +81,123 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
 }
 
 #[async_trait::async_trait]
-pub trait CliContext: crate::Context {
+pub trait CallRemote: crate::Context {
     async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError>;
 }
 
-#[async_trait::async_trait]
-pub trait CliContextHttp: crate::Context {
-    fn client(&self) -> &Client;
-    fn url(&self) -> Url;
-    async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
-        let rpc_req = RpcRequest {
-            id: Some(Id::Number(0.into())),
-            method: GenericRpcMethod::new(method),
-            params,
-        };
-        let mut req = self.client().request(Method::POST, self.url());
-        let body;
+pub async fn call_remote_http(
+    client: &Client,
+    url: Url,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
+    let rpc_req = RpcRequest {
+        id: Some(Id::Number(0.into())),
+        method: GenericRpcMethod::new(method),
+        params,
+    };
+    let mut req = client.request(Method::POST, url);
+    let body;
+    #[cfg(feature = "cbor")]
+    {
+        req = req.header("content-type", "application/cbor");
+        req = req.header("accept", "application/cbor, application/json");
+        body = serde_cbor::to_vec(&rpc_req)?;
+    }
+    #[cfg(not(feature = "cbor"))]
+    {
+        req = req.header("content-type", "application/json");
+        req = req.header("accept", "application/json");
+        body = serde_json::to_vec(&req)?;
+    }
+    let res = req
+        .header("content-length", body.len())
+        .body(body)
+        .send()
+        .await?;
+
+    match res
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some("application/json") => {
+            serde_json::from_slice::<RpcResponse>(&*res.bytes().await.map_err(internal_error)?)
+                .map_err(parse_error)?
+                .result
+        }
         #[cfg(feature = "cbor")]
-        {
-            req = req.header("content-type", "application/cbor");
-            req = req.header("accept", "application/cbor, application/json");
-            body = serde_cbor::to_vec(&rpc_req)?;
+        Some("application/cbor") => {
+            serde_cbor::from_slice::<RpcResponse>(&*res.bytes().await.map_err(internal_error)?)
+                .map_err(parse_error)?
+                .result
         }
-        #[cfg(not(feature = "cbor"))]
-        {
-            req = req.header("content-type", "application/json");
-            req = req.header("accept", "application/json");
-            body = serde_json::to_vec(&req)?;
-        }
-        let res = req
-            .header("content-length", body.len())
-            .body(body)
-            .send()
-            .await?;
+        _ => Err(internal_error("missing content type")),
+    }
+}
 
-        match res
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-        {
-            Some("application/json") => {
-                serde_json::from_slice::<RpcResponse>(&*res.bytes().await.map_err(internal_error)?)
-                    .map_err(parse_error)?
-                    .result
-            }
-            #[cfg(feature = "cbor")]
-            Some("application/cbor") => {
-                serde_cbor::from_slice::<RpcResponse>(&*res.bytes().await.map_err(internal_error)?)
-                    .map_err(parse_error)?
-                    .result
-            }
-            _ => Err(internal_error("missing content type")),
+pub async fn call_remote_socket(
+    connection: impl AsyncRead + AsyncWrite,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
+    let rpc_req = RpcRequest {
+        id: Some(Id::Number(0.into())),
+        method: GenericRpcMethod::new(method),
+        params,
+    };
+    let conn = connection;
+    tokio::pin!(conn);
+    let mut buf = serde_json::to_vec(&rpc_req).map_err(|e| RpcError {
+        data: Some(e.to_string().into()),
+        ..yajrc::INTERNAL_ERROR
+    })?;
+    buf.push(b'\n');
+    conn.write_all(&buf).await.map_err(|e| RpcError {
+        data: Some(e.to_string().into()),
+        ..yajrc::INTERNAL_ERROR
+    })?;
+    let mut line = String::new();
+    BufReader::new(conn).read_line(&mut line).await?;
+    serde_json::from_str::<RpcResponse>(&line)
+        .map_err(parse_error)?
+        .result
+}
+
+pub struct CallRemoteHandler<RemoteContext, RemoteHandler> {
+    _phantom: PhantomData<RemoteContext>,
+    handler: RemoteHandler,
+}
+impl<RemoteContext, RemoteHandler> CallRemoteHandler<RemoteContext, RemoteHandler> {
+    pub fn new(handler: RemoteHandler) -> Self {
+        Self {
+            _phantom: PhantomData,
+            handler: handler,
         }
     }
 }
-#[async_trait::async_trait]
-impl<T> CliContext for T
-where
-    T: CliContextHttp,
+impl<RemoteContext, RemoteHandler: Clone> Clone
+    for CallRemoteHandler<RemoteContext, RemoteHandler>
 {
-    async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
-        <Self as CliContextHttp>::call_remote(&self, method, params).await
-    }
-}
-
-#[async_trait::async_trait]
-pub trait CliContextSocket: crate::Context {
-    type Stream: AsyncRead + AsyncWrite + Send;
-    async fn connect(&self) -> std::io::Result<Self::Stream>;
-    async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
-        let rpc_req = RpcRequest {
-            id: Some(Id::Number(0.into())),
-            method: GenericRpcMethod::new(method),
-            params,
-        };
-        let conn = self.connect().await.map_err(|e| RpcError {
-            data: Some(e.to_string().into()),
-            ..yajrc::INTERNAL_ERROR
-        })?;
-        tokio::pin!(conn);
-        let mut buf = serde_json::to_vec(&rpc_req).map_err(|e| RpcError {
-            data: Some(e.to_string().into()),
-            ..yajrc::INTERNAL_ERROR
-        })?;
-        buf.push(b'\n');
-        conn.write_all(&buf).await.map_err(|e| RpcError {
-            data: Some(e.to_string().into()),
-            ..yajrc::INTERNAL_ERROR
-        })?;
-        let mut line = String::new();
-        BufReader::new(conn).read_line(&mut line).await?;
-        serde_json::from_str::<RpcResponse>(&line)
-            .map_err(parse_error)?
-            .result
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct CallRemote<RemoteContext, RemoteHandler>(PhantomData<(RemoteContext, RemoteHandler)>);
-impl<RemoteContext, RemoteHandler> CallRemote<RemoteContext, RemoteHandler> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-impl<RemoteContext, RemoteHandler> Clone for CallRemote<RemoteContext, RemoteHandler> {
     fn clone(&self) -> Self {
-        Self(PhantomData)
+        Self {
+            _phantom: PhantomData,
+            handler: self.handler.clone(),
+        }
     }
 }
-#[async_trait::async_trait]
-impl<Context: CliContext, RemoteContext, RemoteHandler> Handler<Context>
-    for CallRemote<RemoteContext, RemoteHandler>
+impl<RemoteContext, RemoteHandler> std::fmt::Debug
+    for CallRemoteHandler<RemoteContext, RemoteHandler>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("CallRemoteHandler").finish()
+    }
+}
+
+impl<RemoteContext, RemoteHandler> HandlerTypes for CallRemoteHandler<RemoteContext, RemoteHandler>
 where
     RemoteContext: IntoContext,
-    RemoteHandler: Handler<RemoteContext>,
+    RemoteHandler: HandlerTypes,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
@@ -204,6 +207,18 @@ where
     type InheritedParams = RemoteHandler::InheritedParams;
     type Ok = RemoteHandler::Ok;
     type Err = RemoteHandler::Err;
+}
+#[async_trait::async_trait]
+impl<Context: CallRemote, RemoteContext, RemoteHandler> Handler<Context>
+    for CallRemoteHandler<RemoteContext, RemoteHandler>
+where
+    RemoteContext: IntoContext,
+    RemoteHandler: Handler<RemoteContext>,
+    RemoteHandler::Params: Serialize,
+    RemoteHandler::InheritedParams: Serialize,
+    RemoteHandler::Ok: DeserializeOwned,
+    RemoteHandler::Err: From<RpcError>,
+{
     async fn handle_async(
         &self,
         handle_args: HandleArgs<Context, Self>,
@@ -227,5 +242,51 @@ where
                 .map_err(Self::Err::from),
             Err(e) => Err(Self::Err::from(e)),
         }
+    }
+}
+// #[async_trait::async_trait]
+impl<Context: CallRemote, RemoteContext, RemoteHandler> CliBindings<Context>
+    for CallRemoteHandler<RemoteContext, RemoteHandler>
+where
+    RemoteContext: IntoContext,
+    RemoteHandler: Handler<RemoteContext> + CliBindings<Context>,
+    RemoteHandler::Params: Serialize,
+    RemoteHandler::InheritedParams: Serialize,
+    RemoteHandler::Ok: DeserializeOwned,
+    RemoteHandler::Err: From<RpcError>,
+{
+    fn cli_command(&self, ctx_ty: TypeId) -> clap::Command {
+        self.handler.cli_command(ctx_ty)
+    }
+    fn cli_parse(
+        &self,
+        matches: &clap::ArgMatches,
+        ctx_ty: TypeId,
+    ) -> Result<(std::collections::VecDeque<&'static str>, Value), clap::Error> {
+        self.handler.cli_parse(matches, ctx_ty)
+    }
+    fn cli_display(
+        &self,
+        HandleArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandleArgs<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.handler.cli_display(
+            HandleArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            },
+            result,
+        )
     }
 }

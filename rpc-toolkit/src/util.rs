@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, FusedFuture};
+use futures::stream::FusedStream;
 use futures::{Future, FutureExt, Stream, StreamExt};
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
@@ -148,6 +149,9 @@ impl<'a, T> JobRunner<'a, T> {
                         self.running.push(job.boxed());
                     } else {
                         self.closed = true;
+                        if self.running.is_empty() {
+                            return None;
+                        }
                     }
                 }
                 res = self.next() => {
@@ -169,6 +173,52 @@ impl<'a, T> Stream for JobRunner<'a, T> {
             }
             a => a.map(Some),
         }
+    }
+}
+
+#[pin_project::pin_project]
+pub struct StreamUntil<S, F> {
+    #[pin]
+    stream: S,
+    #[pin]
+    until: F,
+    done: bool,
+}
+impl<S, F> StreamUntil<S, F> {
+    pub fn new(stream: S, until: F) -> Self {
+        Self {
+            stream,
+            until,
+            done: false,
+        }
+    }
+}
+impl<S, F> Stream for StreamUntil<S, F>
+where
+    S: Stream,
+    F: Future,
+{
+    type Item = S::Item;
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.project();
+        *this.done = *this.done || this.until.poll(cx).is_ready();
+        if *this.done {
+            std::task::Poll::Ready(None)
+        } else {
+            this.stream.poll_next(cx)
+        }
+    }
+}
+impl<S, F> FusedStream for StreamUntil<S, F>
+where
+    S: FusedStream,
+    F: FusedFuture,
+{
+    fn is_terminated(&self) -> bool {
+        self.done || self.stream.is_terminated() || self.until.is_terminated()
     }
 }
 

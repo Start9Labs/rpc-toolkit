@@ -25,7 +25,7 @@ impl Default for ExecutionContext {
 
 #[derive(Default)]
 pub struct LeafOptions {
-    macro_debug: bool,
+    macro_debug: Option<Path>,
     blocking: Option<Path>,
     is_async: bool,
     aliases: Vec<LitStr>,
@@ -34,6 +34,7 @@ pub struct LeafOptions {
     exec_ctx: ExecutionContext,
     display: Option<Path>,
     metadata: HashMap<Ident, Lit>,
+    clap_attr: Vec<NestedMeta>,
 }
 
 pub struct SelfImplInfo {
@@ -79,22 +80,18 @@ impl Options {
     }
 }
 
+#[derive(Clone)]
 pub struct ArgOptions {
     ty: Type,
-    optional: bool,
-    check_is_present: bool,
-    help: Option<LitStr>,
     name: Option<Ident>,
     rename: Option<LitStr>,
-    short: Option<LitChar>,
-    long: Option<LitStr>,
     parse: Option<Path>,
-    default: Option<Option<LitStr>>,
-    count: Option<Path>,
-    multiple: Option<Path>,
     stdin: Option<Path>,
+    default: Option<Path>,
+    clap_attr: Vec<NestedMeta>,
 }
 
+#[derive(Clone)]
 pub enum ParamType {
     None,
     Arg(ArgOptions),
