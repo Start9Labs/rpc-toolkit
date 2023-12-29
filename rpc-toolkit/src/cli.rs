@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::marker::PhantomData;
 
@@ -63,14 +64,14 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
         let (method, params) = root_handler.cli_parse(&matches, ctx_ty)?;
         let res = root_handler.handle_sync(HandleAnyArgs {
             context: ctx.clone().upcast(),
-            parent_method: Vec::new(),
+            parent_method: VecDeque::new(),
             method: method.clone(),
             params: params.clone(),
         })?;
         root_handler.cli_display(
             HandleAnyArgs {
                 context: ctx.upcast(),
-                parent_method: Vec::new(),
+                parent_method: VecDeque::new(),
                 method,
                 params,
             },

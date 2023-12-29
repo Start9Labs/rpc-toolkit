@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use futures::future::{join_all, BoxFuture};
@@ -23,6 +24,14 @@ pub use socket::*;
 pub struct Server<Context: crate::Context> {
     make_ctx: Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
     root_handler: Arc<AnyHandler<Context, ParentHandler>>,
+}
+impl<Context: crate::Context> Clone for Server<Context> {
+    fn clone(&self) -> Self {
+        Self {
+            make_ctx: self.make_ctx.clone(),
+            root_handler: self.root_handler.clone(),
+        }
+    }
 }
 impl<Context: crate::Context> Server<Context> {
     pub fn new<
@@ -54,7 +63,7 @@ impl<Context: crate::Context> Server<Context> {
             root_handler
                 .handle_async(HandleAnyArgs {
                     context: make_ctx().await?.upcast(),
-                    parent_method: Vec::new(),
+                    parent_method: VecDeque::new(),
                     method: method.ok_or_else(|| yajrc::METHOD_NOT_FOUND_ERROR)?,
                     params,
                 })

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches, Parser};
 use futures::Future;
+use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,7 @@ use crate::{CallRemote, CallRemoteHandler};
 
 pub(crate) struct HandleAnyArgs {
     pub(crate) context: AnyContext,
-    pub(crate) parent_method: Vec<&'static str>,
+    pub(crate) parent_method: VecDeque<&'static str>,
     pub(crate) method: VecDeque<&'static str>,
     pub(crate) params: Value,
 }
@@ -53,6 +54,11 @@ impl HandleAnyArgs {
 pub(crate) trait HandleAny: std::fmt::Debug + Send + Sync {
     fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
     async fn handle_async(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
+    fn metadata(
+        &self,
+        method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value>;
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>>;
 }
 #[async_trait::async_trait]
@@ -62,6 +68,13 @@ impl<T: HandleAny> HandleAny for Arc<T> {
     }
     async fn handle_async(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
         self.deref().handle_async(handle_args).await
+    }
+    fn metadata(
+        &self,
+        method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.deref().metadata(method, ctx_ty)
     }
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
         self.deref().method_from_dots(method, ctx_ty)
@@ -122,6 +135,16 @@ impl HandleAny for DynHandler {
             DynHandler::WithCli(h) => h.handle_async(handle_args).await,
         }
     }
+    fn metadata(
+        &self,
+        method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        match self {
+            DynHandler::WithoutCli(h) => h.metadata(method, ctx_ty),
+            DynHandler::WithCli(h) => h.metadata(method, ctx_ty),
+        }
+    }
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
         match self {
             DynHandler::WithoutCli(h) => h.method_from_dots(method, ctx_ty),
@@ -133,7 +156,7 @@ impl HandleAny for DynHandler {
 #[derive(Debug, Clone)]
 pub struct HandleArgs<Context: IntoContext, H: HandlerTypes + ?Sized> {
     pub context: Context,
-    pub parent_method: Vec<&'static str>,
+    pub parent_method: VecDeque<&'static str>,
     pub method: VecDeque<&'static str>,
     pub params: H::Params,
     pub inherited_params: H::InheritedParams,
@@ -178,6 +201,14 @@ pub trait Handler<Context: IntoContext>:
             .spawn_blocking(move || s.handle_sync(handle_args))
             .await
             .unwrap()
+    }
+    #[allow(unused_variables)]
+    fn metadata(
+        &self,
+        method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        OrdMap::new()
     }
     fn contexts(&self) -> Option<BTreeSet<TypeId>> {
         Context::type_ids_for(self)
@@ -234,6 +265,13 @@ where
                 .await?,
         )
         .map_err(internal_error)
+    }
+    fn metadata(
+        &self,
+        method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.handler.metadata(method, ctx_ty)
     }
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
         self.handler.method_from_dots(method, ctx_ty)
@@ -318,13 +356,19 @@ impl SubcommandMap {
 pub struct ParentHandler<Params = NoParams, InheritedParams = NoParams> {
     _phantom: PhantomData<(Params, InheritedParams)>,
     pub(crate) subcommands: SubcommandMap,
+    metadata: OrdMap<&'static str, Value>,
 }
 impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     pub fn new() -> Self {
         Self {
             _phantom: PhantomData,
             subcommands: SubcommandMap(BTreeMap::new()),
+            metadata: OrdMap::new(),
         }
+    }
+    pub fn with_metadata(mut self, key: &'static str, value: Value) -> Self {
+        self.metadata.insert(key, value);
+        self
     }
 }
 impl<Params, InheritedParams> Clone for ParentHandler<Params, InheritedParams> {
@@ -332,6 +376,7 @@ impl<Params, InheritedParams> Clone for ParentHandler<Params, InheritedParams> {
         Self {
             _phantom: PhantomData,
             subcommands: self.subcommands.clone(),
+            metadata: self.metadata.clone(),
         }
     }
 }
@@ -430,6 +475,19 @@ where
             inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
             raw_params,
         })
+    }
+    fn metadata(
+        &self,
+        method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.handler.metadata(method, ctx_ty)
+    }
+    fn contexts(&self) -> Option<BTreeSet<TypeId>> {
+        self.handler.contexts()
+    }
+    fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
+        self.handler.method_from_dots(method, ctx_ty)
     }
 }
 
@@ -742,7 +800,7 @@ where
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
         if let Some(cmd) = cmd {
-            parent_method.push(cmd);
+            parent_method.push_back(cmd);
         }
         if let Some((_, sub_handler)) = &self.subcommands.get(context.inner_type_id(), cmd) {
             sub_handler.handle_sync(HandleAnyArgs {
@@ -767,7 +825,7 @@ where
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
         if let Some(cmd) = cmd {
-            parent_method.push(cmd);
+            parent_method.push_back(cmd);
         }
         if let Some((_, sub_handler)) = self.subcommands.get(context.inner_type_id(), cmd) {
             sub_handler
@@ -780,6 +838,18 @@ where
                 .await
         } else {
             Err(yajrc::METHOD_NOT_FOUND_ERROR)
+        }
+    }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        let mut metadata = self.metadata.clone();
+        if let Some((_, handler)) = self.subcommands.get(ctx_ty, method.pop_front()) {
+            handler.metadata(method, ctx_ty).union(metadata)
+        } else {
+            metadata
         }
     }
     fn contexts(&self) -> Option<BTreeSet<TypeId>> {
@@ -872,7 +942,7 @@ where
     ) -> Result<(), Self::Err> {
         let cmd = method.pop_front();
         if let Some(cmd) = cmd {
-            parent_method.push(cmd);
+            parent_method.push_back(cmd);
         }
         if let Some((_, DynHandler::WithCli(sub_handler))) =
             self.subcommands.get(context.inner_type_id(), cmd)
@@ -896,6 +966,13 @@ pub struct FromFn<F, T, E, Args> {
     _phantom: PhantomData<(T, E, Args)>,
     function: F,
     blocking: bool,
+    metadata: OrdMap<&'static str, Value>,
+}
+impl<F, T, E, Args> FromFn<F, T, E, Args> {
+    pub fn with_metadata(mut self, key: &'static str, value: Value) -> Self {
+        self.metadata.insert(key, value);
+        self
+    }
 }
 impl<F: Clone, T, E, Args> Clone for FromFn<F, T, E, Args> {
     fn clone(&self) -> Self {
@@ -903,6 +980,7 @@ impl<F: Clone, T, E, Args> Clone for FromFn<F, T, E, Args> {
             _phantom: PhantomData,
             function: self.function.clone(),
             blocking: self.blocking,
+            metadata: self.metadata.clone(),
         }
     }
 }
@@ -929,6 +1007,7 @@ pub fn from_fn<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args> {
         function,
         _phantom: PhantomData,
         blocking: false,
+        metadata: OrdMap::new(),
     }
 }
 
@@ -937,18 +1016,21 @@ pub fn from_fn_blocking<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args> {
         function,
         _phantom: PhantomData,
         blocking: true,
+        metadata: OrdMap::new(),
     }
 }
 
 pub struct FromFnAsync<F, Fut, T, E, Args> {
     _phantom: PhantomData<(Fut, T, E, Args)>,
     function: F,
+    metadata: OrdMap<&'static str, Value>,
 }
 impl<F: Clone, Fut, T, E, Args> Clone for FromFnAsync<F, Fut, T, E, Args> {
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData,
             function: self.function.clone(),
+            metadata: self.metadata.clone(),
         }
     }
 }
@@ -972,6 +1054,7 @@ pub fn from_fn_async<F, Fut, T, E, Args>(function: F) -> FromFnAsync<F, Fut, T, 
     FromFnAsync {
         function,
         _phantom: PhantomData,
+        metadata: OrdMap::new(),
     }
 }
 
@@ -1007,6 +1090,13 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
+    }
 }
 impl<F, Fut, T, E> HandlerTypes for FromFnAsync<F, Fut, T, E, ()>
 where
@@ -1031,6 +1121,13 @@ where
 {
     async fn handle_async(&self, _: HandleArgs<Context, Self>) -> Result<Self::Ok, Self::Err> {
         (self.function)().await
+    }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
     }
 }
 
@@ -1067,6 +1164,13 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
+    }
 }
 impl<Context, F, Fut, T, E> HandlerTypes for FromFnAsync<F, Fut, T, E, (Context,)>
 where
@@ -1095,6 +1199,13 @@ where
         handle_args: HandleArgs<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args.context).await
+    }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
     }
 }
 
@@ -1136,6 +1247,13 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
+    }
 }
 
 impl<Context, F, Fut, T, E, Params> HandlerTypes for FromFnAsync<F, Fut, T, E, (Context, Params)>
@@ -1171,6 +1289,13 @@ where
             context, params, ..
         } = handle_args;
         (self.function)(context, params).await
+    }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
     }
 }
 
@@ -1219,6 +1344,13 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
+    }
 }
 
 impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerTypes
@@ -1260,6 +1392,13 @@ where
             ..
         } = handle_args;
         (self.function)(context, params, inherited_params).await
+    }
+    fn metadata(
+        &self,
+        mut method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
     }
 }
 
