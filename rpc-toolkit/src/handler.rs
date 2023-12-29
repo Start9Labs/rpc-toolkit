@@ -321,7 +321,7 @@ impl<'a> std::borrow::Borrow<Option<&'a str>> for Name {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SubcommandMap(pub(crate) BTreeMap<Name, BTreeMap<Option<TypeId>, DynHandler>>);
+pub(crate) struct SubcommandMap(pub(crate) OrdMap<Name, OrdMap<Option<TypeId>, DynHandler>>);
 impl SubcommandMap {
     fn insert(
         &mut self,
@@ -362,7 +362,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     pub fn new() -> Self {
         Self {
             _phantom: PhantomData,
-            subcommands: SubcommandMap(BTreeMap::new()),
+            subcommands: SubcommandMap(OrdMap::new()),
             metadata: OrdMap::new(),
         }
     }
