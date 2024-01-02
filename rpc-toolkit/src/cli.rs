@@ -165,11 +165,11 @@ pub async fn call_remote_socket(
         .result
 }
 
-pub struct CallRemoteHandler<RemoteContext, RemoteHandler> {
-    _phantom: PhantomData<RemoteContext>,
+pub struct CallRemoteHandler<Context, RemoteHandler> {
+    _phantom: PhantomData<Context>,
     handler: RemoteHandler,
 }
-impl<RemoteContext, RemoteHandler> CallRemoteHandler<RemoteContext, RemoteHandler> {
+impl<Context, RemoteHandler> CallRemoteHandler<Context, RemoteHandler> {
     pub fn new(handler: RemoteHandler) -> Self {
         Self {
             _phantom: PhantomData,
@@ -177,9 +177,7 @@ impl<RemoteContext, RemoteHandler> CallRemoteHandler<RemoteContext, RemoteHandle
         }
     }
 }
-impl<RemoteContext, RemoteHandler: Clone> Clone
-    for CallRemoteHandler<RemoteContext, RemoteHandler>
-{
+impl<Context, RemoteHandler: Clone> Clone for CallRemoteHandler<Context, RemoteHandler> {
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData,
@@ -187,17 +185,14 @@ impl<RemoteContext, RemoteHandler: Clone> Clone
         }
     }
 }
-impl<RemoteContext, RemoteHandler> std::fmt::Debug
-    for CallRemoteHandler<RemoteContext, RemoteHandler>
-{
+impl<Context, RemoteHandler> std::fmt::Debug for CallRemoteHandler<Context, RemoteHandler> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("CallRemoteHandler").finish()
     }
 }
 
-impl<RemoteContext, RemoteHandler> HandlerTypes for CallRemoteHandler<RemoteContext, RemoteHandler>
+impl<Context, RemoteHandler> HandlerTypes for CallRemoteHandler<Context, RemoteHandler>
 where
-    RemoteContext: IntoContext,
     RemoteHandler: HandlerTypes,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
@@ -210,16 +205,15 @@ where
     type Err = RemoteHandler::Err;
 }
 #[async_trait::async_trait]
-impl<Context: CallRemote, RemoteContext, RemoteHandler> Handler<Context>
-    for CallRemoteHandler<RemoteContext, RemoteHandler>
+impl<Context: CallRemote, RemoteHandler> Handler for CallRemoteHandler<Context, RemoteHandler>
 where
-    RemoteContext: IntoContext,
-    RemoteHandler: Handler<RemoteContext>,
+    RemoteHandler: Handler,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
     RemoteHandler::Err: From<RpcError>,
 {
+    type Context = Context;
     async fn handle_async(
         &self,
         handle_args: HandleArgs<Context, Self>,
@@ -245,17 +239,15 @@ where
         }
     }
 }
-// #[async_trait::async_trait]
-impl<Context: CallRemote, RemoteContext, RemoteHandler> CliBindings<Context>
-    for CallRemoteHandler<RemoteContext, RemoteHandler>
+impl<Context: CallRemote, RemoteHandler> CliBindings for CallRemoteHandler<Context, RemoteHandler>
 where
-    RemoteContext: IntoContext,
-    RemoteHandler: Handler<RemoteContext> + CliBindings<Context>,
+    RemoteHandler: Handler + CliBindings<Context = Context>,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
     RemoteHandler::Err: From<RpcError>,
 {
+    type Context = Context;
     fn cli_command(&self, ctx_ty: TypeId) -> clap::Command {
         self.handler.cli_command(ctx_ty)
     }

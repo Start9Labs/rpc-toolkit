@@ -120,7 +120,7 @@ fn make_api() -> ParentHandler {
         donde: String,
     }
     ParentHandler::new()
-        .subcommand_remote_cli::<CliContext, _, _>(
+        .subcommand(
             "echo",
             from_fn_async(
                 |c: ServerContext, EchoParams { next }: EchoParams| async move {
@@ -129,7 +129,8 @@ fn make_api() -> ParentHandler {
                         Value::String(Arc::new(next)),
                     ))
                 },
-            ),
+            )
+            .with_remote_cli::<CliContext>(),
         )
         .subcommand(
             "hello",

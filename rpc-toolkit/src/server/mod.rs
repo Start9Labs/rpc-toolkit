@@ -8,7 +8,7 @@ use imbl_value::Value;
 use yajrc::{RpcError, RpcMethod};
 
 use crate::util::{invalid_request, JobRunner};
-use crate::{AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
+use crate::{AnyContext, AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
 
 type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
 type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
@@ -23,7 +23,7 @@ pub use socket::*;
 
 pub struct Server<Context: crate::Context> {
     make_ctx: Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
-    root_handler: Arc<AnyHandler<Context, ParentHandler>>,
+    root_handler: Arc<AnyHandler<ParentHandler>>,
 }
 impl<Context: crate::Context> Clone for Server<Context> {
     fn clone(&self) -> Self {

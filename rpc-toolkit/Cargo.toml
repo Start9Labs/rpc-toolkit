@@ -23,6 +23,7 @@ futures = "0.3"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
+itertools = "0.12"
 imbl-value = "0.1"
 lazy_format = "2"
 lazy_static = "1.4"

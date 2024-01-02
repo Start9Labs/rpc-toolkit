@@ -1033,6 +1033,7 @@ dependencies = [
  "http-body-util",
  "hyper 1.0.1",
  "imbl-value",
+ "itertools",
  "lazy_format",
  "lazy_static",
  "openssl",
