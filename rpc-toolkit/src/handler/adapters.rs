@@ -13,12 +13,13 @@ use yajrc::RpcError;
 
 use crate::util::{internal_error, parse_error, Flat};
 use crate::{
-    iter_from_ctx_and_handler, AnyHandler, CallRemote, CliBindings, DynHandler, EitherContext,
-    HandleArgs, Handler, HandlerTypes, IntoContext, IntoHandlers, PrintCliResult,
+    iter_from_ctx_and_handler, AnyContext, AnyHandler, CallRemote, CliBindings, DynHandler,
+    EitherContext, HandleArgs, Handler, HandlerTypes, IntoContext, IntoHandlers, PrintCliResult,
 };
 
-pub trait HandlerExt: HandlerTypes + Sized {
+pub trait HandlerExt: Handler + Sized {
     fn no_cli(self) -> NoCli<Self>;
+    fn no_display(self) -> NoDisplay<Self>;
     fn with_custom_display<P>(self, display: P) -> CustomDisplay<P, Self>
     where
         P: PrintCliResult<
@@ -42,9 +43,12 @@ pub trait HandlerExt: HandlerTypes + Sized {
     fn with_remote_cli<Context>(self) -> RemoteCli<Context, Self>;
 }
 
-impl<T: HandlerTypes + Sized> HandlerExt for T {
+impl<T: Handler + Sized> HandlerExt for T {
     fn no_cli(self) -> NoCli<Self> {
         NoCli(self)
+    }
+    fn no_display(self) -> NoDisplay<Self> {
+        NoDisplay(self)
     }
     fn with_custom_display<P>(self, display: P) -> CustomDisplay<P, Self>
     where
@@ -115,6 +119,107 @@ where
             self.0.contexts(),
             DynHandler::WithoutCli(Arc::new(AnyHandler::new(self.0))),
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NoDisplay<H>(pub H);
+impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
+    type Params = H::Params;
+    type InheritedParams = H::InheritedParams;
+    type Ok = H::Ok;
+    type Err = H::Err;
+}
+#[async_trait::async_trait]
+impl<H> Handler for NoDisplay<H>
+where
+    H: Handler,
+{
+    type Context = H::Context;
+    fn handle_sync(
+        &self,
+        HandleArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandleArgs<Self::Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0.handle_sync(HandleArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        })
+    }
+    async fn handle_async(
+        &self,
+        HandleArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandleArgs<Self::Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0
+            .handle_async(HandleArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            })
+            .await
+    }
+    fn metadata(
+        &self,
+        method: VecDeque<&'static str>,
+        ctx_ty: TypeId,
+    ) -> OrdMap<&'static str, Value> {
+        self.0.metadata(method, ctx_ty)
+    }
+    fn contexts(&self) -> Option<OrdSet<TypeId>> {
+        self.0.contexts()
+    }
+    fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
+        self.0.method_from_dots(method, ctx_ty)
+    }
+}
+impl<H> CliBindings for NoDisplay<H>
+where
+    H: HandlerTypes,
+    H::Params: FromArgMatches + CommandFactory + Serialize,
+{
+    type Context = AnyContext;
+    fn cli_command(&self, _: TypeId) -> clap::Command {
+        H::Params::command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &clap::ArgMatches,
+        _: TypeId,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        _: HandleArgs<Self::Context, Self>,
+        _: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        Ok(())
     }
 }
 
