@@ -1362,7 +1362,7 @@ fn build_inherited(parent_data: Option<Type>, generics: &Generics) -> (TokenStre
         )
     } else {
         (
-            quote! { type InheritedParams = ::rpc_toolkit::NoParams; },
+            quote! { type InheritedParams = ::rpc_toolkit::Empty; },
             inherited_generics,
         )
     }

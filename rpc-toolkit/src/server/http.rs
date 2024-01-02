@@ -1,10 +1,8 @@
 use std::any::TypeId;
-use std::task::Context;
 
 use futures::future::{join_all, BoxFuture};
 use futures::FutureExt;
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use http::request::Parts;
 use http_body_util::BodyExt;
 use hyper::body::{Bytes, Incoming};
 use hyper::service::Service;
@@ -16,7 +14,7 @@ use yajrc::{RpcError, RpcMethod};
 
 use crate::server::{RpcRequest, RpcResponse, SingleOrBatchRpcRequest};
 use crate::util::{internal_error, parse_error};
-use crate::{handler, HandleAny, Server};
+use crate::{HandleAny, Server};
 
 const FALLBACK_ERROR: &str = "{\"error\":{\"code\":-32603,\"message\":\"Internal error\",\"data\":\"Failed to serialize rpc response\"}}";
 

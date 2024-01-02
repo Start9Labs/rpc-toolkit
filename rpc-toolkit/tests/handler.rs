@@ -8,8 +8,8 @@ use clap::Parser;
 use futures::future::ready;
 use imbl_value::Value;
 use rpc_toolkit::{
-    call_remote_socket, from_fn, from_fn_async, AnyContext, CallRemote, CliApp, Context, NoParams,
-    ParentHandler, Server,
+    call_remote_socket, from_fn, from_fn_async, AnyContext, CallRemote, CliApp, Context, Empty,
+    HandlerExt, ParentHandler, Server,
 };
 use serde::{Deserialize, Serialize};
 use tokio::runtime::{Handle, Runtime};
@@ -141,7 +141,7 @@ fn make_api() -> ParentHandler {
         .subcommand("a_hello", from_fn_async(a_hello))
         .subcommand(
             "dondes",
-            ParentHandler::<InheritParams>::new().subcommand_with_inherited_no_cli(
+            ParentHandler::<InheritParams>::new().subcommand(
                 "donde",
                 from_fn(|c: CliContext, _: (), donde| {
                     Ok::<_, RpcError>(
@@ -151,8 +151,9 @@ fn make_api() -> ParentHandler {
                         )
                         .to_string(),
                     )
-                }),
-                |InheritParams { donde }, _| donde,
+                })
+                .with_inherited(|InheritParams { donde }, _| donde)
+                .no_cli(),
             ),
         )
         .subcommand(
@@ -166,21 +167,22 @@ fn make_api() -> ParentHandler {
                         )
                         .to_string(),
                     )
-                }),
-                |id, _| id,
+                })
+                .with_inherited(|a, _| a),
             ),
         )
         .subcommand(
             "error",
-            ParentHandler::<InheritParams>::new().root_handler_no_cli(
+            ParentHandler::<InheritParams>::new().root_handler(
                 from_fn(|c: CliContext, _, InheritParams { donde }| {
                     Err::<String, _>(RpcError {
                         code: 1,
                         message: "This is an example message".into(),
                         data: None,
                     })
-                }),
-                |id, _| id,
+                })
+                .with_inherited(|a, _| a)
+                .no_cli(),
             ),
         )
 }

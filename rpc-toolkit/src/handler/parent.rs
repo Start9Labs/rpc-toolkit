@@ -12,15 +12,22 @@ use yajrc::RpcError;
 
 use crate::util::{combine, Flat};
 use crate::{
-    AnyContext, AnyHandler, CliBindings, DynHandler, HandleAny, HandleAnyArgs, HandleArgs, Handler,
-    HandlerTypes, IntoContext, NoCli, NoParams,
+    AnyContext, AnyHandler, CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, HandleArgs,
+    Handler, HandlerTypes, IntoContext, OrEmpty,
 };
 
 pub trait IntoHandlers: HandlerTypes {
     fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler)>;
 }
 
-impl<H: Handler + CliBindings> IntoHandlers for H {
+impl<H> IntoHandlers for H
+where
+    H: Handler + CliBindings,
+    H::Params: DeserializeOwned,
+    H::InheritedParams: DeserializeOwned,
+    H::Ok: Serialize + DeserializeOwned,
+    RpcError: From<H::Err>,
+{
     fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler)> {
         iter_from_ctx_and_handler(
             intersect_type_ids(self.contexts(), <Self as CliBindings>::Context::type_ids()),
@@ -89,7 +96,7 @@ impl SubcommandMap {
     }
 }
 
-pub struct ParentHandler<Params = NoParams, InheritedParams = NoParams> {
+pub struct ParentHandler<Params = Empty, InheritedParams = Empty> {
     _phantom: PhantomData<(Params, InheritedParams)>,
     pub(crate) subcommands: SubcommandMap,
     metadata: OrdMap<&'static str, Value>,
@@ -124,152 +131,6 @@ impl<Params, InheritedParams> std::fmt::Debug for ParentHandler<Params, Inherite
     }
 }
 
-struct InheritanceHandler<Params, InheritedParams, H, F> {
-    _phantom: PhantomData<(Params, InheritedParams)>,
-    handler: H,
-    inherit: F,
-}
-impl<Params, InheritedParams, H: Clone, F: Clone> Clone
-    for InheritanceHandler<Params, InheritedParams, H, F>
-{
-    fn clone(&self) -> Self {
-        Self {
-            _phantom: PhantomData,
-            handler: self.handler.clone(),
-            inherit: self.inherit.clone(),
-        }
-    }
-}
-impl<Params, InheritedParams, H: std::fmt::Debug, F> std::fmt::Debug
-    for InheritanceHandler<Params, InheritedParams, H, F>
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("InheritanceHandler")
-            .field(&self.handler)
-            .finish()
-    }
-}
-impl<Params, InheritedParams, H, F> HandlerTypes
-    for InheritanceHandler<Params, InheritedParams, H, F>
-where
-    H: HandlerTypes,
-    Params: Send + Sync,
-    InheritedParams: Send + Sync,
-{
-    type Params = H::Params;
-    type InheritedParams = Flat<Params, InheritedParams>;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-#[async_trait::async_trait]
-impl<Params, InheritedParams, H, F> Handler for InheritanceHandler<Params, InheritedParams, H, F>
-where
-    Params: Send + Sync + 'static,
-    InheritedParams: Send + Sync + 'static,
-    H: Handler,
-    F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
-{
-    type Context = H::Context;
-    fn handle_sync(
-        &self,
-        HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandleArgs<Self::Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandleArgs<Self::Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
-            raw_params,
-        })
-    }
-    fn metadata(
-        &self,
-        method: VecDeque<&'static str>,
-        ctx_ty: TypeId,
-    ) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method, ctx_ty)
-    }
-    fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        self.handler.contexts()
-    }
-    fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method, ctx_ty)
-    }
-}
-
-impl<Params, InheritedParams, H, F> CliBindings
-    for InheritanceHandler<Params, InheritedParams, H, F>
-where
-    Params: Send + Sync + 'static,
-    InheritedParams: Send + Sync + 'static,
-    H: CliBindings,
-    F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
-{
-    type Context = H::Context;
-    fn cli_command(&self, ctx_ty: TypeId) -> Command {
-        self.handler.cli_command(ctx_ty)
-    }
-    fn cli_parse(
-        &self,
-        matches: &ArgMatches,
-        ctx_ty: TypeId,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.handler.cli_parse(matches, ctx_ty)
-    }
-    fn cli_display(
-        &self,
-        HandleArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandleArgs<Self::Context, Self>,
-        result: Self::Ok,
-    ) -> Result<(), Self::Err> {
-        self.handler.cli_display(
-            HandleArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
-                raw_params,
-            },
-            result,
-        )
-    }
-}
-
 impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     fn get_contexts(&self) -> Option<OrdSet<TypeId>> {
         let mut set = OrdSet::new();
@@ -278,17 +139,21 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
         }
         Some(set)
     }
+    #[allow(private_bounds)]
     pub fn subcommand<H>(mut self, name: &'static str, handler: H) -> Self
     where
-        H: IntoHandlers<InheritedParams = Flat<Params, InheritedParams>>,
+        H: IntoHandlers,
+        H::InheritedParams: OrEmpty<Flat<Params, InheritedParams>>,
     {
         self.subcommands
             .insert(name.into(), handler.into_handlers());
         self
     }
+    #[allow(private_bounds)]
     pub fn root_handler<H>(mut self, handler: H) -> Self
     where
-        H: IntoHandlers<Params = NoParams, InheritedParams = Flat<Params, InheritedParams>>,
+        H: IntoHandlers<Params = Empty>,
+        H::InheritedParams: OrEmpty<Flat<Params, InheritedParams>>,
     {
         self.subcommands.insert(None, handler.into_handlers());
         self
@@ -486,35 +351,5 @@ where
         } else {
             Err(yajrc::METHOD_NOT_FOUND_ERROR)
         }
-    }
-}
-impl<Params, InheritedParams> IntoHandlers for ParentHandler<Params, InheritedParams>
-where
-    Self: HandlerTypes + Handler + CliBindings,
-    <Self as HandlerTypes>::Params: DeserializeOwned,
-    <Self as HandlerTypes>::InheritedParams: DeserializeOwned,
-    <Self as HandlerTypes>::Ok: Serialize + DeserializeOwned,
-    RpcError: From<<Self as HandlerTypes>::Err>,
-{
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler)> {
-        iter_from_ctx_and_handler(
-            self.contexts(),
-            DynHandler::WithoutCli(Arc::new(AnyHandler::new(self))),
-        )
-    }
-}
-impl<Params, InheritedParams> IntoHandlers for NoCli<ParentHandler<Params, InheritedParams>>
-where
-    ParentHandler<Params, InheritedParams>: HandlerTypes + Handler,
-    <ParentHandler<Params, InheritedParams> as HandlerTypes>::Params: DeserializeOwned,
-    <ParentHandler<Params, InheritedParams> as HandlerTypes>::InheritedParams: DeserializeOwned,
-    <ParentHandler<Params, InheritedParams> as HandlerTypes>::Ok: Serialize + DeserializeOwned,
-    RpcError: From<<ParentHandler<Params, InheritedParams> as HandlerTypes>::Err>,
-{
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler)> {
-        iter_from_ctx_and_handler(
-            self.0.contexts(),
-            DynHandler::WithoutCli(Arc::new(AnyHandler::new(self.0))),
-        )
     }
 }

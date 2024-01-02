@@ -8,7 +8,7 @@ use imbl_value::Value;
 use yajrc::{RpcError, RpcMethod};
 
 use crate::util::{invalid_request, JobRunner};
-use crate::{AnyContext, AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
+use crate::{AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
 
 type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
 type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;

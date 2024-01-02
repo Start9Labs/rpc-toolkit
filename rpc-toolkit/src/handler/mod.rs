@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
 use crate::context::{AnyContext, IntoContext};
-use crate::util::{internal_error, invalid_params};
+use crate::util::{internal_error, invalid_params, Flat};
 
 pub mod adapters;
 pub mod from_fn;
@@ -311,7 +311,11 @@ where
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
-pub struct NoParams {}
+pub struct Empty {}
+
+pub(crate) trait OrEmpty<T> {}
+impl<T> OrEmpty<T> for T {}
+impl<A, B> OrEmpty<Flat<A, B>> for Empty {}
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
 pub enum Never {}

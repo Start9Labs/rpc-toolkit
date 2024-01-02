@@ -2,7 +2,6 @@ use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Display;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use futures::Future;
@@ -10,12 +9,10 @@ use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use yajrc::RpcError;
 
 use crate::marker::LeafHandler;
 use crate::{
-    intersect_type_ids, iter_from_ctx_and_handler, AnyContext, AnyHandler, CliBindings, DynHandler,
-    HandleArgs, Handler, HandlerTypes, IntoContext, IntoHandlers, NoCli, NoParams, PrintCliResult,
+    AnyContext, CliBindings, Empty, HandleArgs, Handler, HandlerTypes, IntoContext, PrintCliResult,
 };
 
 pub struct FromFn<F, T, E, Args> {
@@ -56,36 +53,6 @@ where
     type Context = AnyContext;
     fn print(&self, _: HandleArgs<Self::Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
         Ok(println!("{result}"))
-    }
-}
-impl<F, T, E, Args> IntoHandlers for FromFn<F, T, E, Args>
-where
-    Self: HandlerTypes + Handler + CliBindings,
-    <Self as HandlerTypes>::Params: DeserializeOwned,
-    <Self as HandlerTypes>::InheritedParams: DeserializeOwned,
-    <Self as HandlerTypes>::Ok: Serialize + DeserializeOwned,
-    RpcError: From<<Self as HandlerTypes>::Err>,
-{
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, crate::DynHandler)> {
-        iter_from_ctx_and_handler(
-            intersect_type_ids(self.contexts(), <Self as CliBindings>::Context::type_ids()),
-            DynHandler::WithCli(Arc::new(AnyHandler::new(self))),
-        )
-    }
-}
-impl<F, T, E, Args> IntoHandlers for NoCli<FromFn<F, T, E, Args>>
-where
-    Self: HandlerTypes + Handler,
-    <Self as HandlerTypes>::Params: DeserializeOwned,
-    <Self as HandlerTypes>::InheritedParams: DeserializeOwned,
-    <Self as HandlerTypes>::Ok: Serialize + DeserializeOwned,
-    RpcError: From<<Self as HandlerTypes>::Err>,
-{
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, crate::DynHandler)> {
-        iter_from_ctx_and_handler(
-            self.contexts(),
-            DynHandler::WithoutCli(Arc::new(AnyHandler::new(self))),
-        )
     }
 }
 
@@ -136,36 +103,6 @@ where
         Ok(println!("{result}"))
     }
 }
-impl<F, Fut, T, E, Args> IntoHandlers for FromFnAsync<F, Fut, T, E, Args>
-where
-    Self: HandlerTypes + Handler + CliBindings,
-    <Self as HandlerTypes>::Params: DeserializeOwned,
-    <Self as HandlerTypes>::InheritedParams: DeserializeOwned,
-    <Self as HandlerTypes>::Ok: Serialize + DeserializeOwned,
-    RpcError: From<<Self as HandlerTypes>::Err>,
-{
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, crate::DynHandler)> {
-        iter_from_ctx_and_handler(
-            intersect_type_ids(self.contexts(), <Self as CliBindings>::Context::type_ids()),
-            DynHandler::WithCli(Arc::new(AnyHandler::new(self))),
-        )
-    }
-}
-impl<F, Fut, T, E, Args> IntoHandlers for NoCli<FromFnAsync<F, Fut, T, E, Args>>
-where
-    Self: HandlerTypes + Handler,
-    <Self as HandlerTypes>::Params: DeserializeOwned,
-    <Self as HandlerTypes>::InheritedParams: DeserializeOwned,
-    <Self as HandlerTypes>::Ok: Serialize + DeserializeOwned,
-    RpcError: From<<Self as HandlerTypes>::Err>,
-{
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, crate::DynHandler)> {
-        iter_from_ctx_and_handler(
-            self.contexts(),
-            DynHandler::WithoutCli(Arc::new(AnyHandler::new(self))),
-        )
-    }
-}
 
 pub fn from_fn_async<F, Fut, T, E, Args>(function: F) -> FromFnAsync<F, Fut, T, E, Args> {
     FromFnAsync {
@@ -181,8 +118,8 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Params = NoParams;
-    type InheritedParams = NoParams;
+    type Params = Empty;
+    type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
 }
@@ -218,8 +155,8 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Params = NoParams;
-    type InheritedParams = NoParams;
+    type Params = Empty;
+    type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
 }
@@ -250,8 +187,8 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Params = NoParams;
-    type InheritedParams = NoParams;
+    type Params = Empty;
+    type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
 }
@@ -292,8 +229,8 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Params = NoParams;
-    type InheritedParams = NoParams;
+    type Params = Empty;
+    type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
 }
@@ -327,7 +264,7 @@ where
     E: Send + Sync + 'static,
 {
     type Params = Params;
-    type InheritedParams = NoParams;
+    type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
 }
@@ -374,7 +311,7 @@ where
     E: Send + Sync + 'static,
 {
     type Params = Params;
-    type InheritedParams = NoParams;
+    type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
 }
