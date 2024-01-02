@@ -483,7 +483,7 @@ where
         self.handler.metadata(method, ctx_ty)
     }
     fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        todo!()
+        Self::Context::type_ids()
     }
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
         self.handler.method_from_dots(method, ctx_ty)
