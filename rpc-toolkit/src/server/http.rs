@@ -38,7 +38,7 @@ pub fn json_http_response<T: Serialize>(t: &T) -> Response<Bytes> {
         .unwrap_or_else(|_| fallback_rpc_error_response())
 }
 
-type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
+pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
 
 #[async_trait::async_trait]
 pub trait Middleware<Context: Send + 'static>: Clone + Send + Sync + 'static {
