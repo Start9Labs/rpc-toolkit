@@ -10,10 +10,10 @@ use yajrc::{RpcError, RpcMethod};
 use crate::util::{invalid_request, JobRunner};
 use crate::{AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
 
-type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
-type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
-type RpcResponse = yajrc::RpcResponse<GenericRpcMethod>;
-type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMethod>;
+pub type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
+pub type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
+pub type RpcResponse = yajrc::RpcResponse<GenericRpcMethod>;
+pub type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMethod>;
 
 mod http;
 mod socket;
