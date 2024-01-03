@@ -56,7 +56,10 @@ where
     }
 }
 
-pub fn from_fn<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args> {
+pub fn from_fn<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args>
+where
+    FromFn<F, T, E, Args>: HandlerTypes,
+{
     FromFn {
         function,
         _phantom: PhantomData,
@@ -65,7 +68,10 @@ pub fn from_fn<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args> {
     }
 }
 
-pub fn from_fn_blocking<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args> {
+pub fn from_fn_blocking<F, T, E, Args>(function: F) -> FromFn<F, T, E, Args>
+where
+    FromFn<F, T, E, Args>: HandlerTypes,
+{
     FromFn {
         function,
         _phantom: PhantomData,
@@ -104,7 +110,10 @@ where
     }
 }
 
-pub fn from_fn_async<F, Fut, T, E, Args>(function: F) -> FromFnAsync<F, Fut, T, E, Args> {
+pub fn from_fn_async<F, Fut, T, E, Args>(function: F) -> FromFnAsync<F, Fut, T, E, Args>
+where
+    FromFnAsync<F, Fut, T, E, Args>: HandlerTypes,
+{
     FromFnAsync {
         function,
         _phantom: PhantomData,
