@@ -240,7 +240,7 @@ where
 impl<P, H> Handler for CustomDisplay<P, H>
 where
     H: Handler,
-    P: Send + Sync + Clone + Debug + 'static,
+    P: Send + Sync + Clone + 'static,
 {
     type Context = H::Context;
     fn handle_sync(
@@ -311,7 +311,6 @@ where
         > + Send
         + Sync
         + Clone
-        + Debug
         + 'static,
 {
     type Context = P::Context;
@@ -393,7 +392,7 @@ impl<Context, F, H> Handler for CustomDisplayFn<Context, F, H>
 where
     Context: Send + Sync + 'static,
     H: Handler,
-    F: Send + Sync + Clone + Debug + 'static,
+    F: Send + Sync + Clone + 'static,
 {
     type Context = H::Context;
     fn handle_sync(
@@ -456,12 +455,7 @@ impl<Context, F, H> CliBindings for CustomDisplayFn<Context, F, H>
 where
     Context: IntoContext,
     H: CliBindings,
-    F: Fn(HandleArgs<Context, H>, H::Ok) -> Result<(), H::Err>
-        + Send
-        + Sync
-        + Clone
-        + Debug
-        + 'static,
+    F: Fn(HandleArgs<Context, H>, H::Ok) -> Result<(), H::Err> + Send + Sync + Clone + 'static,
 {
     type Context = Context;
     fn cli_command(&self, ctx_ty: TypeId) -> clap::Command {

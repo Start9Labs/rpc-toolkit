@@ -67,7 +67,7 @@ impl<'a> std::borrow::Borrow<Option<&'a str>> for Name {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct SubcommandMap(pub(crate) OrdMap<Name, OrdMap<Option<TypeId>, DynHandler>>);
 impl SubcommandMap {
     fn insert(
@@ -125,7 +125,7 @@ impl<Params, InheritedParams> Clone for ParentHandler<Params, InheritedParams> {
 impl<Params, InheritedParams> std::fmt::Debug for ParentHandler<Params, InheritedParams> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ParentHandler")
-            .field(&self.subcommands)
+            // .field(&self.subcommands)
             .finish()
     }
 }

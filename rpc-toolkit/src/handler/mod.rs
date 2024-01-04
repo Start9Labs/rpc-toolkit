@@ -55,7 +55,7 @@ impl HandleAnyArgs {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait HandleAny: std::fmt::Debug + Send + Sync {
+pub(crate) trait HandleAny: Send + Sync {
     fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
     async fn handle_async(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
     fn metadata(
@@ -122,7 +122,7 @@ pub trait PrintCliResult: HandlerTypes {
 pub(crate) trait HandleAnyWithCli: HandleAny + CliBindingsAny {}
 impl<T: HandleAny + CliBindingsAny> HandleAnyWithCli for T {}
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[allow(private_interfaces)]
 pub enum DynHandler {
     WithoutCli(Arc<dyn HandleAny>),
@@ -178,7 +178,7 @@ pub trait HandlerTypes {
 }
 
 #[async_trait::async_trait]
-pub trait Handler: HandlerTypes + std::fmt::Debug + Clone + Send + Sync + 'static {
+pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
     type Context: IntoContext;
     fn handle_sync(
         &self,
