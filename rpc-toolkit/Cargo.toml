@@ -16,13 +16,14 @@ cbor = ["serde_cbor"]
 default = ["cbor"]
 
 [dependencies]
+axum = "0.7.3"
 async-stream = "0.3"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 http = "1"
 http-body-util = "0.1"
-hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
+# hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
 itertools = "0.12"
 imbl-value = { git = "https://github.com/Start9Labs/imbl-value.git" }
 lazy_format = "2"

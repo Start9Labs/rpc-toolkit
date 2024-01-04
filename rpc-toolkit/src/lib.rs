@@ -25,7 +25,7 @@ pub use handler::*;
 /// See also: [arg](rpc_toolkit_macro::arg), [context](rpc_toolkit_macro::context)
 pub use rpc_toolkit_macro::command;
 pub use server::*;
-pub use {clap, futures, hyper, reqwest, serde, serde_json, tokio, url, yajrc};
+pub use {clap, futures, reqwest, serde, serde_json, tokio, url, yajrc};
 
 mod cli;
 pub mod command_helpers;

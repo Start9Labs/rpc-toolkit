@@ -1,12 +1,14 @@
 use std::any::TypeId;
 
+use axum::body::Body;
+use axum::extract::Request;
+use axum::handler::Handler;
+use axum::response::Response;
 use futures::future::{join_all, BoxFuture};
 use futures::FutureExt;
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http_body_util::BodyExt;
-use hyper::body::{Bytes, Incoming};
-use hyper::service::Service;
-use hyper::{Request, Response};
+use imbl_value::imbl::Vector;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -18,15 +20,15 @@ use crate::{HandleAny, Server};
 
 const FALLBACK_ERROR: &str = "{\"error\":{\"code\":-32603,\"message\":\"Internal error\",\"data\":\"Failed to serialize rpc response\"}}";
 
-pub fn fallback_rpc_error_response() -> Response<Bytes> {
+pub fn fallback_rpc_error_response() -> Response {
     Response::builder()
         .header(CONTENT_TYPE, "application/json")
         .header(CONTENT_LENGTH, FALLBACK_ERROR.len())
-        .body(Bytes::from_static(FALLBACK_ERROR.as_bytes()))
+        .body(Body::from(FALLBACK_ERROR.as_bytes()))
         .unwrap()
 }
 
-pub fn json_http_response<T: Serialize>(t: &T) -> Response<Bytes> {
+pub fn json_http_response<T: Serialize>(t: &T) -> Response {
     let body = match serde_json::to_vec(t) {
         Ok(a) => a,
         Err(_) => return fallback_rpc_error_response(),
@@ -34,11 +36,9 @@ pub fn json_http_response<T: Serialize>(t: &T) -> Response<Bytes> {
     Response::builder()
         .header(CONTENT_TYPE, "application/json")
         .header(CONTENT_LENGTH, body.len())
-        .body(Bytes::from(body))
+        .body(Body::from(body))
         .unwrap_or_else(|_| fallback_rpc_error_response())
 }
-
-pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
 
 #[async_trait::async_trait]
 pub trait Middleware<Context: Send + 'static>: Clone + Send + Sync + 'static {
@@ -47,8 +47,8 @@ pub trait Middleware<Context: Send + 'static>: Clone + Send + Sync + 'static {
     async fn process_http_request(
         &mut self,
         context: &Context,
-        request: &mut Request<BoxBody>,
-    ) -> Result<(), Response<Bytes>> {
+        request: &mut Request,
+    ) -> Result<(), Response> {
         Ok(())
     }
     #[allow(unused_variables)]
@@ -63,7 +63,7 @@ pub trait Middleware<Context: Send + 'static>: Clone + Send + Sync + 'static {
     #[allow(unused_variables)]
     async fn process_rpc_response(&mut self, context: &Context, response: &mut RpcResponse) {}
     #[allow(unused_variables)]
-    async fn process_http_response(&mut self, context: &Context, response: &mut Response<Bytes>) {}
+    async fn process_http_response(&mut self, context: &Context, response: &mut Response) {}
 }
 
 #[allow(private_bounds)]
@@ -72,8 +72,8 @@ trait _Middleware<Context>: Send + Sync {
     fn process_http_request<'a>(
         &'a mut self,
         context: &'a Context,
-        request: &'a mut Request<BoxBody>,
-    ) -> BoxFuture<'a, Result<(), Response<Bytes>>>;
+        request: &'a mut Request,
+    ) -> BoxFuture<'a, Result<(), Response>>;
     fn process_rpc_request<'a>(
         &'a mut self,
         context: &'a Context,
@@ -89,7 +89,7 @@ trait _Middleware<Context>: Send + Sync {
     fn process_http_response<'a>(
         &'a mut self,
         context: &'a Context,
-        response: &'a mut Response<Bytes>,
+        response: &'a mut Response,
     ) -> BoxFuture<'a, ()>;
 }
 impl<Context: Send + 'static, T: Middleware<Context> + Send + Sync> _Middleware<Context> for T {
@@ -99,8 +99,8 @@ impl<Context: Send + 'static, T: Middleware<Context> + Send + Sync> _Middleware<
     fn process_http_request<'a>(
         &'a mut self,
         context: &'a Context,
-        request: &'a mut Request<BoxBody>,
-    ) -> BoxFuture<'a, Result<(), Response<Bytes>>> {
+        request: &'a mut Request,
+    ) -> BoxFuture<'a, Result<(), Response>> {
         <Self as Middleware<Context>>::process_http_request(self, context, request)
     }
     fn process_rpc_request<'a>(
@@ -129,7 +129,7 @@ impl<Context: Send + 'static, T: Middleware<Context> + Send + Sync> _Middleware<
     fn process_http_response<'a>(
         &'a mut self,
         context: &'a Context,
-        response: &'a mut Response<Bytes>,
+        response: &'a mut Response,
     ) -> BoxFuture<'a, ()> {
         <Self as Middleware<Context>>::process_http_response(self, context, response)
     }
@@ -144,7 +144,7 @@ impl<Context> Clone for DynMiddleware<Context> {
 
 pub struct HttpServer<Context: crate::Context> {
     inner: Server<Context>,
-    middleware: Vec<DynMiddleware<Context>>,
+    middleware: Vector<DynMiddleware<Context>>,
 }
 impl<Context: crate::Context> Clone for HttpServer<Context> {
     fn clone(&self) -> Self {
@@ -158,7 +158,7 @@ impl<Context: crate::Context> Server<Context> {
     pub fn for_http(self) -> HttpServer<Context> {
         HttpServer {
             inner: self,
-            middleware: Vec::new(),
+            middleware: Vector::new(),
         }
     }
     pub fn middleware<T: Middleware<Context>>(self, middleware: T) -> HttpServer<Context> {
@@ -167,10 +167,11 @@ impl<Context: crate::Context> Server<Context> {
 }
 impl<Context: crate::Context> HttpServer<Context> {
     pub fn middleware<T: Middleware<Context>>(mut self, middleware: T) -> Self {
-        self.middleware.push(DynMiddleware(Box::new(middleware)));
+        self.middleware
+            .push_back(DynMiddleware(Box::new(middleware)));
         self
     }
-    async fn process_http_request(&self, mut req: Request<BoxBody>) -> Response<Bytes> {
+    async fn process_http_request(&self, mut req: Request) -> Response {
         let mut mid = self.middleware.clone();
         match async {
             let ctx = (self.inner.make_ctx)().await?;
@@ -234,7 +235,7 @@ impl<Context: crate::Context> HttpServer<Context> {
     async fn process_rpc_request(
         &self,
         ctx: &Context,
-        mid: &mut Vec<DynMiddleware<Context>>,
+        mid: &mut Vector<DynMiddleware<Context>>,
         mut req: RpcRequest,
     ) -> RpcResponse {
         let metadata = Value::Object(
@@ -278,25 +279,15 @@ impl<Context: crate::Context> HttpServer<Context> {
         }
         res
     }
-    pub fn handle(&self, req: Request<Incoming>) -> BoxFuture<'static, Response<Bytes>> {
+    pub fn handle(&self, req: Request) -> BoxFuture<'static, Response> {
         let server = self.clone();
-        async move {
-            server
-                .process_http_request(req.map(|b| BoxBody::new(b)))
-                .await
-        }
-        .boxed()
+        async move { server.process_http_request(req).await }.boxed()
     }
 }
 
-impl<Context: crate::Context> Service<Request<Incoming>> for HttpServer<Context> {
-    type Response = Response<Bytes>;
-    type Error = hyper::Error;
-    type Future = futures::future::Map<
-        BoxFuture<'static, Self::Response>,
-        fn(Self::Response) -> Result<Self::Response, Self::Error>,
-    >;
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
-        self.handle(req).map(Ok)
+impl<Context: crate::Context> Handler<(), ()> for HttpServer<Context> {
+    type Future = BoxFuture<'static, Response>;
+    fn call(self, req: Request, _: ()) -> Self::Future {
+        self.handle(req)
     }
 }
