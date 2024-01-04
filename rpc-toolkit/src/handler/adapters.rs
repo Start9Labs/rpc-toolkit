@@ -454,19 +454,26 @@ where
 impl<Context, F, H> CliBindings for CustomDisplayFn<Context, F, H>
 where
     Context: IntoContext,
-    H: CliBindings,
+    H: HandlerTypes,
+    H::Params: FromArgMatches + CommandFactory + Serialize,
     F: Fn(HandleArgs<Context, H>, H::Ok) -> Result<(), H::Err> + Send + Sync + Clone + 'static,
 {
     type Context = Context;
-    fn cli_command(&self, ctx_ty: TypeId) -> clap::Command {
-        self.handler.cli_command(ctx_ty)
+    fn cli_command(&self, _: TypeId) -> clap::Command {
+        H::Params::command()
     }
     fn cli_parse(
         &self,
         matches: &clap::ArgMatches,
-        ctx_ty: TypeId,
+        _: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.handler.cli_parse(matches, ctx_ty)
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
     }
     fn cli_display(
         &self,
