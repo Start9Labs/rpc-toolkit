@@ -15,8 +15,8 @@ pub type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
 pub type RpcResponse = yajrc::RpcResponse<GenericRpcMethod>;
 pub type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMethod>;
 
-mod http;
-mod socket;
+pub mod http;
+pub mod socket;
 
 pub use http::*;
 pub use socket::*;
