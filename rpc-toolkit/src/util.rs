@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use futures::future::{BoxFuture, FusedFuture};
 use futures::stream::FusedStream;
@@ -222,16 +222,21 @@ where
     }
 }
 
-// #[derive(Debug)]
-// pub enum Infallible {}
-// impl<T> From<Infallible> for T {
-//     fn from(value: Infallible) -> Self {
-//         match value {}
-//     }
-// }
-// impl std::fmt::Display for Infallible {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match *self {}
-//     }
-// }
-// impl std::error::Error for Infallible {}
+pub struct PhantomData<T>(std::marker::PhantomData<T>);
+impl<T> PhantomData<T> {
+    pub fn new() -> Self {
+        PhantomData(std::marker::PhantomData)
+    }
+}
+impl<T> Clone for PhantomData<T> {
+    fn clone(&self) -> Self {
+        PhantomData::new()
+    }
+}
+impl<T> Debug for PhantomData<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+unsafe impl<T> Send for PhantomData<T> {}
+unsafe impl<T> Sync for PhantomData<T> {}

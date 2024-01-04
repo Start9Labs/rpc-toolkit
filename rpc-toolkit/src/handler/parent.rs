@@ -1,6 +1,5 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
@@ -10,7 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
 
-use crate::util::{combine, Flat};
+use crate::util::{combine, Flat, PhantomData};
 use crate::{
     AnyContext, AnyHandler, CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, HandleArgs,
     Handler, HandlerTypes, IntoContext, OrEmpty,
@@ -104,7 +103,7 @@ pub struct ParentHandler<Params = Empty, InheritedParams = Empty> {
 impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     pub fn new() -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             subcommands: SubcommandMap(OrdMap::new()),
             metadata: OrdMap::new(),
         }
@@ -117,7 +116,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
 impl<Params, InheritedParams> Clone for ParentHandler<Params, InheritedParams> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             subcommands: self.subcommands.clone(),
             metadata: self.metadata.clone(),
         }

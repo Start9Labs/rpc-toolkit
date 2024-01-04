@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use clap::{ArgMatches, CommandFactory, FromArgMatches};
@@ -9,7 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use yajrc::RpcError;
 
-use crate::util::{extract, Flat};
+use crate::util::{extract, Flat, PhantomData};
 
 /// Stores a command's implementation for a given context
 /// Can be created from anything that implements ParentCommand, AsyncCommand, or SyncCommand

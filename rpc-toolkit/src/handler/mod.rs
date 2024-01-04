@@ -15,7 +15,6 @@ use crate::util::{internal_error, invalid_params, Flat};
 
 pub mod adapters;
 pub mod from_fn;
-pub mod marker;
 pub mod parent;
 
 pub use adapters::*;

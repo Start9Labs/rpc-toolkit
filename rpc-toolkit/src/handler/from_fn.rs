@@ -1,7 +1,6 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Display;
-use std::marker::PhantomData;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use futures::Future;
@@ -10,7 +9,7 @@ use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::marker::LeafHandler;
+use crate::util::PhantomData;
 use crate::{
     AnyContext, CliBindings, Empty, HandleArgs, Handler, HandlerTypes, IntoContext, PrintCliResult,
 };
@@ -30,7 +29,7 @@ impl<F, T, E, Args> FromFn<F, T, E, Args> {
 impl<F: Clone, T, E, Args> Clone for FromFn<F, T, E, Args> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             function: self.function.clone(),
             blocking: self.blocking,
             metadata: self.metadata.clone(),
@@ -44,7 +43,6 @@ impl<F, T, E, Args> std::fmt::Debug for FromFn<F, T, E, Args> {
             .finish()
     }
 }
-impl<F, T, E, Args> LeafHandler for FromFn<F, T, E, Args> {}
 impl<F, T, E, Args> PrintCliResult for FromFn<F, T, E, Args>
 where
     Self: HandlerTypes,
@@ -62,7 +60,7 @@ where
 {
     FromFn {
         function,
-        _phantom: PhantomData,
+        _phantom: PhantomData::new(),
         blocking: false,
         metadata: OrdMap::new(),
     }
@@ -74,7 +72,7 @@ where
 {
     FromFn {
         function,
-        _phantom: PhantomData,
+        _phantom: PhantomData::new(),
         blocking: true,
         metadata: OrdMap::new(),
     }
@@ -85,10 +83,22 @@ pub struct FromFnAsync<F, Fut, T, E, Args> {
     function: F,
     metadata: OrdMap<&'static str, Value>,
 }
+unsafe impl<F, Fut, T, E, Args> Send for FromFnAsync<F, Fut, T, E, Args>
+where
+    F: Send,
+    OrdMap<&'static str, Value>: Send,
+{
+}
+unsafe impl<F, Fut, T, E, Args> Sync for FromFnAsync<F, Fut, T, E, Args>
+where
+    F: Sync,
+    OrdMap<&'static str, Value>: Sync,
+{
+}
 impl<F: Clone, Fut, T, E, Args> Clone for FromFnAsync<F, Fut, T, E, Args> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             function: self.function.clone(),
             metadata: self.metadata.clone(),
         }
@@ -116,7 +126,7 @@ where
 {
     FromFnAsync {
         function,
-        _phantom: PhantomData,
+        _phantom: PhantomData::new(),
         metadata: OrdMap::new(),
     }
 }
@@ -160,7 +170,7 @@ where
 impl<F, Fut, T, E> HandlerTypes for FromFnAsync<F, Fut, T, E, ()>
 where
     F: Fn() -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
@@ -173,7 +183,7 @@ where
 impl<F, Fut, T, E> Handler for FromFnAsync<F, Fut, T, E, ()>
 where
     F: Fn() -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
@@ -234,7 +244,7 @@ impl<Context, F, Fut, T, E> HandlerTypes for FromFnAsync<F, Fut, T, E, (Context,
 where
     Context: IntoContext,
     F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
@@ -248,7 +258,7 @@ impl<Context, F, Fut, T, E> Handler for FromFnAsync<F, Fut, T, E, (Context,)>
 where
     Context: IntoContext,
     F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
@@ -314,7 +324,7 @@ impl<Context, F, Fut, T, E, Params> HandlerTypes for FromFnAsync<F, Fut, T, E, (
 where
     Context: IntoContext,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -329,7 +339,7 @@ impl<Context, F, Fut, T, E, Params> Handler for FromFnAsync<F, Fut, T, E, (Conte
 where
     Context: IntoContext,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -407,7 +417,7 @@ impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerTypes
 where
     Context: IntoContext,
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
     InheritedParams: DeserializeOwned + Send + Sync + 'static,
     T: Send + Sync + 'static,
@@ -424,7 +434,7 @@ impl<Context, F, Fut, T, E, Params, InheritedParams> Handler
 where
     Context: IntoContext,
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
     InheritedParams: DeserializeOwned + Send + Sync + 'static,
     T: Send + Sync + 'static,

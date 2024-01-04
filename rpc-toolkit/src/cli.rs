@@ -1,7 +1,6 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::marker::PhantomData;
 
 use clap::{CommandFactory, FromArgMatches};
 use imbl_value::Value;
@@ -12,7 +11,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use url::Url;
 use yajrc::{Id, RpcError};
 
-use crate::util::{internal_error, parse_error, Flat};
+use crate::util::{internal_error, parse_error, Flat, PhantomData};
 use crate::{
     AnyHandler, CliBindings, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, HandleArgs,
     Handler, HandlerTypes, IntoContext, Name, ParentHandler,
@@ -35,7 +34,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
         root_handler: ParentHandler,
     ) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             make_ctx: Box::new(make_ctx),
             root_handler,
         }
@@ -172,7 +171,7 @@ pub struct CallRemoteHandler<Context, RemoteHandler> {
 impl<Context, RemoteHandler> CallRemoteHandler<Context, RemoteHandler> {
     pub fn new(handler: RemoteHandler) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             handler: handler,
         }
     }
@@ -180,7 +179,7 @@ impl<Context, RemoteHandler> CallRemoteHandler<Context, RemoteHandler> {
 impl<Context, RemoteHandler: Clone> Clone for CallRemoteHandler<Context, RemoteHandler> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             handler: self.handler.clone(),
         }
     }

@@ -1,7 +1,6 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use clap::{CommandFactory, FromArgMatches};
@@ -11,7 +10,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
 
-use crate::util::{internal_error, parse_error, Flat};
+use crate::util::{internal_error, parse_error, Flat, PhantomData};
 use crate::{
     iter_from_ctx_and_handler, AnyContext, AnyHandler, CallRemote, CliBindings, DynHandler,
     EitherContext, HandleArgs, Handler, HandlerTypes, IntoContext, IntoHandlers, PrintCliResult,
@@ -72,7 +71,7 @@ impl<T: Handler + Sized> HandlerExt for T {
         F: Fn(HandleArgs<Context, Self>, Self::Ok) -> Result<(), Self::Err>,
     {
         CustomDisplayFn {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             print: display,
             handler: self,
         }
@@ -85,14 +84,14 @@ impl<T: Handler + Sized> HandlerExt for T {
         F: Fn(Params, InheritedParams) -> Self::InheritedParams,
     {
         InheritanceHandler {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             handler: self,
             inherit: f,
         }
     }
     fn with_remote_cli<Context>(self) -> RemoteCli<Context, Self> {
         RemoteCli {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             handler: self,
         }
     }
@@ -366,7 +365,7 @@ pub struct CustomDisplayFn<Context, F, H> {
 impl<Context, F: Clone, H: Clone> Clone for CustomDisplayFn<Context, F, H> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             print: self.print.clone(),
             handler: self.handler.clone(),
         }
@@ -508,7 +507,7 @@ pub struct RemoteCli<Context, H> {
 impl<Context, H: Clone> Clone for RemoteCli<Context, H> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             handler: self.handler.clone(),
         }
     }
@@ -645,7 +644,7 @@ impl<Params, InheritedParams, H: Clone, F: Clone> Clone
 {
     fn clone(&self) -> Self {
         Self {
-            _phantom: PhantomData,
+            _phantom: PhantomData::new(),
             handler: self.handler.clone(),
             inherit: self.inherit.clone(),
         }
