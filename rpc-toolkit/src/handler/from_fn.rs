@@ -83,17 +83,11 @@ pub struct FromFnAsync<F, Fut, T, E, Args> {
     function: F,
     metadata: OrdMap<&'static str, Value>,
 }
-unsafe impl<F, Fut, T, E, Args> Send for FromFnAsync<F, Fut, T, E, Args>
-where
-    F: Send,
-    OrdMap<&'static str, Value>: Send,
-{
-}
-unsafe impl<F, Fut, T, E, Args> Sync for FromFnAsync<F, Fut, T, E, Args>
-where
-    F: Sync,
-    OrdMap<&'static str, Value>: Sync,
-{
+impl<F, Fut, T, E, Args> FromFnAsync<F, Fut, T, E, Args> {
+    pub fn with_metadata(mut self, key: &'static str, value: Value) -> Self {
+        self.metadata.insert(key, value);
+        self
+    }
 }
 impl<F: Clone, Fut, T, E, Args> Clone for FromFnAsync<F, Fut, T, E, Args> {
     fn clone(&self) -> Self {
