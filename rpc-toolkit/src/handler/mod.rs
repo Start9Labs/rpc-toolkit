@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use clap::{ArgMatches, Command, Parser};
+use clap::{ArgMatches, Command, CommandFactory, FromArgMatches, Parser};
 use imbl_value::imbl::{OrdMap, OrdSet};
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
@@ -117,6 +117,55 @@ pub trait PrintCliResult: HandlerTypes {
         handle_args: HandleArgs<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err>;
+}
+
+impl<T> CliBindings for T
+where
+    T: HandlerTypes,
+    T::Params: CommandFactory + FromArgMatches + Serialize,
+    T: PrintCliResult,
+{
+    type Context = T::Context;
+    fn cli_command(&self, _: TypeId) -> clap::Command {
+        Self::Params::command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &clap::ArgMatches,
+        _: TypeId,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        HandleArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandleArgs<Self::Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.print(
+            HandleArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            },
+            result,
+        )
+    }
 }
 
 pub(crate) trait HandleAnyWithCli: HandleAny + CliBindingsAny {}

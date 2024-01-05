@@ -191,33 +191,13 @@ where
         self.0.method_from_dots(method, ctx_ty)
     }
 }
-impl<H> CliBindings for NoDisplay<H>
+impl<H> PrintCliResult for NoDisplay<H>
 where
     H: HandlerTypes,
     H::Params: FromArgMatches + CommandFactory + Serialize,
 {
     type Context = AnyContext;
-    fn cli_command(&self, _: TypeId) -> clap::Command {
-        H::Params::command()
-    }
-    fn cli_parse(
-        &self,
-        matches: &clap::ArgMatches,
-        _: TypeId,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        Self::Params::from_arg_matches(matches).and_then(|a| {
-            Ok((
-                VecDeque::new(),
-                imbl_value::to_value(&a)
-                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
-            ))
-        })
-    }
-    fn cli_display(
-        &self,
-        _: HandleArgs<Self::Context, Self>,
-        _: Self::Ok,
-    ) -> Result<(), Self::Err> {
+    fn print(&self, _: HandleArgs<Self::Context, Self>, _: Self::Ok) -> Result<(), Self::Err> {
         Ok(())
     }
 }
@@ -299,10 +279,9 @@ where
         self.handler.method_from_dots(method, ctx_ty)
     }
 }
-impl<P, H> CliBindings for CustomDisplay<P, H>
+impl<P, H> PrintCliResult for CustomDisplay<P, H>
 where
     H: HandlerTypes,
-    H::Params: FromArgMatches + CommandFactory + Serialize,
     P: PrintCliResult<
             Params = H::Params,
             InheritedParams = H::InheritedParams,
@@ -314,23 +293,7 @@ where
         + 'static,
 {
     type Context = P::Context;
-    fn cli_command(&self, _: TypeId) -> clap::Command {
-        H::Params::command()
-    }
-    fn cli_parse(
-        &self,
-        matches: &clap::ArgMatches,
-        _: TypeId,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        Self::Params::from_arg_matches(matches).and_then(|a| {
-            Ok((
-                VecDeque::new(),
-                imbl_value::to_value(&a)
-                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
-            ))
-        })
-    }
-    fn cli_display(
+    fn print(
         &self,
         HandleArgs {
             context,
@@ -451,31 +414,14 @@ where
         self.handler.method_from_dots(method, ctx_ty)
     }
 }
-impl<Context, F, H> CliBindings for CustomDisplayFn<Context, F, H>
+impl<Context, F, H> PrintCliResult for CustomDisplayFn<Context, F, H>
 where
     Context: IntoContext,
     H: HandlerTypes,
-    H::Params: FromArgMatches + CommandFactory + Serialize,
     F: Fn(HandleArgs<Context, H>, H::Ok) -> Result<(), H::Err> + Send + Sync + Clone + 'static,
 {
     type Context = Context;
-    fn cli_command(&self, _: TypeId) -> clap::Command {
-        H::Params::command()
-    }
-    fn cli_parse(
-        &self,
-        matches: &clap::ArgMatches,
-        _: TypeId,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        Self::Params::from_arg_matches(matches).and_then(|a| {
-            Ok((
-                VecDeque::new(),
-                imbl_value::to_value(&a)
-                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
-            ))
-        })
-    }
-    fn cli_display(
+    fn print(
         &self,
         HandleArgs {
             context,
@@ -594,22 +540,13 @@ where
         self.handler.method_from_dots(method, ctx_ty)
     }
 }
-impl<Context, H> CliBindings for RemoteCli<Context, H>
+impl<Context, H> PrintCliResult for RemoteCli<Context, H>
 where
-    H: CliBindings,
+    Context: IntoContext,
+    H: PrintCliResult,
 {
     type Context = H::Context;
-    fn cli_command(&self, ctx_ty: TypeId) -> clap::Command {
-        self.handler.cli_command(ctx_ty)
-    }
-    fn cli_parse(
-        &self,
-        matches: &clap::ArgMatches,
-        ctx_ty: TypeId,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.handler.cli_parse(matches, ctx_ty)
-    }
-    fn cli_display(
+    fn print(
         &self,
         HandleArgs {
             context,
@@ -621,7 +558,7 @@ where
         }: HandleArgs<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
-        self.handler.cli_display(
+        self.handler.print(
             HandleArgs {
                 context,
                 parent_method,

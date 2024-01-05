@@ -14,7 +14,7 @@ use yajrc::{Id, RpcError};
 use crate::util::{internal_error, parse_error, Flat, PhantomData};
 use crate::{
     AnyHandler, CliBindings, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, HandleArgs,
-    Handler, HandlerTypes, IntoContext, Name, ParentHandler,
+    Handler, HandlerTypes, IntoContext, Name, ParentHandler, PrintCliResult,
 };
 
 type GenericRpcMethod<'a> = yajrc::GenericRpcMethod<&'a str, Value, Value>;
@@ -238,26 +238,17 @@ where
         }
     }
 }
-impl<Context: CallRemote, RemoteHandler> CliBindings for CallRemoteHandler<Context, RemoteHandler>
+impl<Context: CallRemote, RemoteHandler> PrintCliResult
+    for CallRemoteHandler<Context, RemoteHandler>
 where
-    RemoteHandler: Handler + CliBindings<Context = Context>,
+    RemoteHandler: PrintCliResult<Context = Context>,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
     RemoteHandler::Err: From<RpcError>,
 {
     type Context = Context;
-    fn cli_command(&self, ctx_ty: TypeId) -> clap::Command {
-        self.handler.cli_command(ctx_ty)
-    }
-    fn cli_parse(
-        &self,
-        matches: &clap::ArgMatches,
-        ctx_ty: TypeId,
-    ) -> Result<(std::collections::VecDeque<&'static str>, Value), clap::Error> {
-        self.handler.cli_parse(matches, ctx_ty)
-    }
-    fn cli_display(
+    fn print(
         &self,
         HandleArgs {
             context,
@@ -266,10 +257,10 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Context, Self>,
+        }: HandleArgs<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
-        self.handler.cli_display(
+        self.handler.print(
             HandleArgs {
                 context,
                 parent_method,
