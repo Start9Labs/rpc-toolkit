@@ -30,7 +30,7 @@ pub trait HandlerExt: Handler + Sized {
     fn with_custom_display_fn<Context: IntoContext, F>(
         self,
         display: F,
-    ) -> CustomDisplayFn<Context, F, Self>
+    ) -> CustomDisplayFn<F, Self, Context>
     where
         F: Fn(HandleArgs<Context, Self>, Self::Ok) -> Result<(), Self::Err>;
     fn with_inherited<Params, InheritedParams, F>(
@@ -66,7 +66,7 @@ impl<T: Handler + Sized> HandlerExt for T {
     fn with_custom_display_fn<Context: IntoContext, F>(
         self,
         display: F,
-    ) -> CustomDisplayFn<Context, F, Self>
+    ) -> CustomDisplayFn<F, Self, Context>
     where
         F: Fn(HandleArgs<Context, Self>, Self::Ok) -> Result<(), Self::Err>,
     {
@@ -319,12 +319,12 @@ where
     }
 }
 
-pub struct CustomDisplayFn<Context, F, H> {
+pub struct CustomDisplayFn<F, H, Context = AnyContext> {
     _phantom: PhantomData<Context>,
     print: F,
     handler: H,
 }
-impl<Context, F: Clone, H: Clone> Clone for CustomDisplayFn<Context, F, H> {
+impl<Context, F: Clone, H: Clone> Clone for CustomDisplayFn<F, H, Context> {
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -333,7 +333,7 @@ impl<Context, F: Clone, H: Clone> Clone for CustomDisplayFn<Context, F, H> {
         }
     }
 }
-impl<Context, F: Debug, H: Debug> Debug for CustomDisplayFn<Context, F, H> {
+impl<Context, F: Debug, H: Debug> Debug for CustomDisplayFn<F, H, Context> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CustomDisplayFn")
             .field("print", &self.print)
@@ -341,7 +341,7 @@ impl<Context, F: Debug, H: Debug> Debug for CustomDisplayFn<Context, F, H> {
             .finish()
     }
 }
-impl<Context, F, H> HandlerTypes for CustomDisplayFn<Context, F, H>
+impl<F, H, Context> HandlerTypes for CustomDisplayFn<F, H, Context>
 where
     H: HandlerTypes,
 {
@@ -351,7 +351,7 @@ where
     type Err = H::Err;
 }
 #[async_trait::async_trait]
-impl<Context, F, H> Handler for CustomDisplayFn<Context, F, H>
+impl<F, H, Context> Handler for CustomDisplayFn<F, H, Context>
 where
     Context: Send + Sync + 'static,
     H: Handler,
@@ -414,7 +414,7 @@ where
         self.handler.method_from_dots(method, ctx_ty)
     }
 }
-impl<Context, F, H> PrintCliResult for CustomDisplayFn<Context, F, H>
+impl<F, H, Context> PrintCliResult for CustomDisplayFn<F, H, Context>
 where
     Context: IntoContext,
     H: HandlerTypes,
