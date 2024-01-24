@@ -211,11 +211,16 @@ impl HandleAny for DynHandler {
     }
 }
 
+#[allow(type_alias_bounds)]
 pub type HandlerArgsFor<Context: IntoContext, H: HandlerTypes + ?Sized> =
     HandlerArgs<Context, H::Params, H::InheritedParams>;
 
 #[derive(Debug, Clone)]
-pub struct HandlerArgs<Context: IntoContext, Params: Send + Sync, InheritedParams: Send + Sync> {
+pub struct HandlerArgs<
+    Context: IntoContext,
+    Params: Send + Sync = Empty,
+    InheritedParams: Send + Sync = Empty,
+> {
     pub context: Context,
     pub parent_method: VecDeque<&'static str>,
     pub method: VecDeque<&'static str>,
