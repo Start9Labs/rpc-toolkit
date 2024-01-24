@@ -28,7 +28,9 @@ pub(crate) struct HandleAnyArgs {
     pub(crate) params: Value,
 }
 impl HandleAnyArgs {
-    fn downcast<Context: IntoContext, H>(self) -> Result<HandleArgs<Context, H>, imbl_value::Error>
+    fn downcast<Context: IntoContext, H>(
+        self,
+    ) -> Result<HandlerArgsFor<Context, H>, imbl_value::Error>
     where
         H: HandlerTypes,
         H::Params: DeserializeOwned,
@@ -40,7 +42,7 @@ impl HandleAnyArgs {
             method,
             params,
         } = self;
-        Ok(HandleArgs {
+        Ok(HandlerArgs {
             context: Context::downcast(context).map_err(|_| imbl_value::Error {
                 kind: imbl_value::ErrorKind::Deserialization,
                 source: serde::ser::Error::custom("context does not match expected"),
@@ -105,7 +107,7 @@ pub trait CliBindings: HandlerTypes {
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error>;
     fn cli_display(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err>;
 }
@@ -114,7 +116,7 @@ pub trait PrintCliResult: HandlerTypes {
     type Context: IntoContext;
     fn print(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err>;
 }
@@ -144,18 +146,18 @@ where
     }
     fn cli_display(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.print(
-            HandleArgs {
+            HandlerArgs {
                 context,
                 parent_method,
                 method,
@@ -209,13 +211,16 @@ impl HandleAny for DynHandler {
     }
 }
 
+pub type HandlerArgsFor<Context: IntoContext, H: HandlerTypes + ?Sized> =
+    HandlerArgs<Context, H::Params, H::InheritedParams>;
+
 #[derive(Debug, Clone)]
-pub struct HandleArgs<Context: IntoContext, H: HandlerTypes + ?Sized> {
+pub struct HandlerArgs<Context: IntoContext, Params: Send + Sync, InheritedParams: Send + Sync> {
     pub context: Context,
     pub parent_method: VecDeque<&'static str>,
     pub method: VecDeque<&'static str>,
-    pub params: H::Params,
-    pub inherited_params: H::InheritedParams,
+    pub params: Params,
+    pub inherited_params: InheritedParams,
     pub raw_params: Value,
 }
 
@@ -231,7 +236,7 @@ pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
     type Context: IntoContext;
     fn handle_sync(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         handle_args
             .context
@@ -240,17 +245,17 @@ pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
     }
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err>;
     async fn handle_async_with_sync(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handle_sync(handle_args)
     }
     async fn handle_async_with_sync_blocking(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let s = self.clone();
         handle_args
@@ -305,7 +310,7 @@ where
         imbl_value::to_value(
             &self
                 .0
-                .handle_sync(handle_args.downcast().map_err(invalid_params)?)?,
+                .handle_sync(handle_args.downcast::<_, H>().map_err(invalid_params)?)?,
         )
         .map_err(internal_error)
     }
@@ -313,7 +318,7 @@ where
         imbl_value::to_value(
             &self
                 .0
-                .handle_async(handle_args.downcast().map_err(invalid_params)?)
+                .handle_async(handle_args.downcast::<_, H>().map_err(invalid_params)?)
                 .await?,
         )
         .map_err(internal_error)
@@ -351,7 +356,7 @@ where
     fn cli_display(&self, handle_args: HandleAnyArgs, result: Value) -> Result<(), RpcError> {
         self.0
             .cli_display(
-                handle_args.downcast().map_err(invalid_params)?,
+                handle_args.downcast::<_, H>().map_err(invalid_params)?,
                 imbl_value::from_value(result).map_err(internal_error)?,
             )
             .map_err(RpcError::from)

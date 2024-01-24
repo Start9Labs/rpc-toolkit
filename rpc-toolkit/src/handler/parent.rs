@@ -11,8 +11,8 @@ use yajrc::RpcError;
 
 use crate::util::{combine, Flat, PhantomData};
 use crate::{
-    AnyContext, AnyHandler, CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, HandleArgs,
-    Handler, HandlerTypes, IntoContext, OrEmpty,
+    AnyContext, AnyHandler, CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler,
+    HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext, OrEmpty,
 };
 
 pub trait IntoHandlers: HandlerTypes {
@@ -178,13 +178,13 @@ where
     type Context = AnyContext;
     fn handle_sync(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             mut parent_method,
             mut method,
             raw_params,
             ..
-        }: HandleArgs<AnyContext, Self>,
+        }: HandlerArgsFor<AnyContext, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
         if let Some(cmd) = cmd {
@@ -203,13 +203,13 @@ where
     }
     async fn handle_async(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             mut parent_method,
             mut method,
             raw_params,
             ..
-        }: HandleArgs<AnyContext, Self>,
+        }: HandlerArgsFor<AnyContext, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
         if let Some(cmd) = cmd {
@@ -322,13 +322,13 @@ where
     }
     fn cli_display(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             mut parent_method,
             mut method,
             raw_params,
             ..
-        }: HandleArgs<AnyContext, Self>,
+        }: HandlerArgsFor<AnyContext, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         let cmd = method.pop_front();

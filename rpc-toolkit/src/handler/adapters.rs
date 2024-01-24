@@ -13,7 +13,8 @@ use yajrc::RpcError;
 use crate::util::{internal_error, parse_error, Flat, PhantomData};
 use crate::{
     iter_from_ctx_and_handler, AnyContext, AnyHandler, CallRemote, CliBindings, DynHandler,
-    EitherContext, HandleArgs, Handler, HandlerTypes, IntoContext, IntoHandlers, PrintCliResult,
+    EitherContext, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext, IntoHandlers,
+    PrintCliResult,
 };
 
 pub trait HandlerExt: Handler + Sized {
@@ -32,7 +33,7 @@ pub trait HandlerExt: Handler + Sized {
         display: F,
     ) -> CustomDisplayFn<F, Self, Context>
     where
-        F: Fn(HandleArgs<Context, Self>, Self::Ok) -> Result<(), Self::Err>;
+        F: Fn(HandlerArgsFor<Context, Self>, Self::Ok) -> Result<(), Self::Err>;
     fn with_inherited<Params, InheritedParams, F>(
         self,
         f: F,
@@ -68,7 +69,7 @@ impl<T: Handler + Sized> HandlerExt for T {
         display: F,
     ) -> CustomDisplayFn<F, Self, Context>
     where
-        F: Fn(HandleArgs<Context, Self>, Self::Ok) -> Result<(), Self::Err>,
+        F: Fn(HandlerArgsFor<Context, Self>, Self::Ok) -> Result<(), Self::Err>,
     {
         CustomDisplayFn {
             _phantom: PhantomData::new(),
@@ -137,16 +138,16 @@ where
     type Context = H::Context;
     fn handle_sync(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        self.0.handle_sync(HandleArgs {
+        self.0.handle_sync(HandlerArgs {
             context,
             parent_method,
             method,
@@ -157,17 +158,17 @@ where
     }
     async fn handle_async(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.0
-            .handle_async(HandleArgs {
+            .handle_async(HandlerArgs {
                 context,
                 parent_method,
                 method,
@@ -197,7 +198,7 @@ where
     H::Params: FromArgMatches + CommandFactory + Serialize,
 {
     type Context = AnyContext;
-    fn print(&self, _: HandleArgs<Self::Context, Self>, _: Self::Ok) -> Result<(), Self::Err> {
+    fn print(&self, _: HandlerArgsFor<Self::Context, Self>, _: Self::Ok) -> Result<(), Self::Err> {
         Ok(())
     }
 }
@@ -225,16 +226,16 @@ where
     type Context = H::Context;
     fn handle_sync(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandleArgs {
+        self.handler.handle_sync(HandlerArgs {
             context,
             parent_method,
             method,
@@ -245,17 +246,17 @@ where
     }
     async fn handle_async(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler
-            .handle_async(HandleArgs {
+            .handle_async(HandlerArgs {
                 context,
                 parent_method,
                 method,
@@ -295,18 +296,18 @@ where
     type Context = P::Context;
     fn print(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.print.print(
-            HandleArgs {
+            HandlerArgs {
                 context,
                 parent_method,
                 method,
@@ -360,16 +361,16 @@ where
     type Context = H::Context;
     fn handle_sync(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandleArgs {
+        self.handler.handle_sync(HandlerArgs {
             context,
             parent_method,
             method,
@@ -380,17 +381,17 @@ where
     }
     async fn handle_async(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler
-            .handle_async(HandleArgs {
+            .handle_async(HandlerArgs {
                 context,
                 parent_method,
                 method,
@@ -418,23 +419,23 @@ impl<F, H, Context> PrintCliResult for CustomDisplayFn<F, H, Context>
 where
     Context: IntoContext,
     H: HandlerTypes,
-    F: Fn(HandleArgs<Context, H>, H::Ok) -> Result<(), H::Err> + Send + Sync + Clone + 'static,
+    F: Fn(HandlerArgsFor<Context, H>, H::Ok) -> Result<(), H::Err> + Send + Sync + Clone + 'static,
 {
     type Context = Context;
     fn print(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         (self.print)(
-            HandleArgs {
+            HandlerArgs {
                 context,
                 parent_method,
                 method,
@@ -486,14 +487,14 @@ where
     type Context = EitherContext<Context, H::Context>;
     async fn handle_async(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         match context {
             EitherContext::C1(context) => {
@@ -514,7 +515,7 @@ where
             }
             EitherContext::C2(context) => {
                 self.handler
-                    .handle_async(HandleArgs {
+                    .handle_async(HandlerArgs {
                         context,
                         parent_method,
                         method,
@@ -548,18 +549,18 @@ where
     type Context = H::Context;
     fn print(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.handler.print(
-            HandleArgs {
+            HandlerArgs {
                 context,
                 parent_method,
                 method,
@@ -620,16 +621,16 @@ where
     type Context = H::Context;
     fn handle_sync(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandleArgs {
+        self.handler.handle_sync(HandlerArgs {
             context,
             parent_method,
             method,
@@ -640,16 +641,16 @@ where
     }
     async fn handle_async(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandleArgs {
+        self.handler.handle_sync(HandlerArgs {
             context,
             parent_method,
             method,
@@ -694,18 +695,18 @@ where
     }
     fn cli_display(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.handler.cli_display(
-            HandleArgs {
+            HandlerArgs {
                 context,
                 parent_method,
                 method,

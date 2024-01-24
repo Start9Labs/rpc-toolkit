@@ -13,8 +13,8 @@ use yajrc::{Id, RpcError};
 
 use crate::util::{internal_error, parse_error, Flat, PhantomData};
 use crate::{
-    AnyHandler, CliBindings, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, HandleArgs,
-    Handler, HandlerTypes, IntoContext, Name, ParentHandler, PrintCliResult,
+    AnyHandler, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
+    HandlerArgsFor, HandlerTypes, IntoContext, Name, ParentHandler, PrintCliResult,
 };
 
 type GenericRpcMethod<'a> = yajrc::GenericRpcMethod<&'a str, Value, Value>;
@@ -215,7 +215,7 @@ where
     type Context = Context;
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let full_method = handle_args
             .parent_method
@@ -250,18 +250,18 @@ where
     type Context = Context;
     fn print(
         &self,
-        HandleArgs {
+        HandlerArgs {
             context,
             parent_method,
             method,
             params,
             inherited_params,
             raw_params,
-        }: HandleArgs<Self::Context, Self>,
+        }: HandlerArgsFor<Self::Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.handler.print(
-            HandleArgs {
+            HandlerArgs {
                 context,
                 parent_method,
                 method,

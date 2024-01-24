@@ -2,16 +2,15 @@ use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Display;
 
-use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use futures::Future;
 use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 
 use crate::util::PhantomData;
 use crate::{
-    AnyContext, CliBindings, Empty, HandleArgs, Handler, HandlerTypes, IntoContext, PrintCliResult,
+    AnyContext, Empty, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext,
+    PrintCliResult,
 };
 
 pub struct FromFn<F, T, E, Args> {
@@ -49,7 +48,11 @@ where
     <Self as HandlerTypes>::Ok: Display,
 {
     type Context = AnyContext;
-    fn print(&self, _: HandleArgs<Self::Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
+    fn print(
+        &self,
+        _: HandlerArgsFor<Self::Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
         Ok(println!("{result}"))
     }
 }
@@ -109,7 +112,11 @@ where
     <Self as HandlerTypes>::Ok: Display,
 {
     type Context = AnyContext;
-    fn print(&self, _: HandleArgs<Self::Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
+    fn print(
+        &self,
+        _: HandlerArgsFor<Self::Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
         Ok(println!("{result}"))
     }
 }
@@ -122,6 +129,101 @@ where
         function,
         _phantom: PhantomData::new(),
         metadata: OrdMap::new(),
+    }
+}
+
+impl<F, T, E, Context, Params, InheritedParams> HandlerTypes
+    for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams>>
+where
+    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Result<T, E>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    Context: IntoContext,
+    Params: Send + Sync,
+    InheritedParams: Send + Sync,
+{
+    type Params = Params;
+    type InheritedParams = InheritedParams;
+    type Ok = T;
+    type Err = E;
+}
+#[async_trait::async_trait]
+impl<F, T, E, Context, Params, InheritedParams> Handler
+    for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams>>
+where
+    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Result<T, E>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    Context: IntoContext,
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+{
+    type Context = Context;
+    fn handle_sync(
+        &self,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        (self.function)(handle_args)
+    }
+    async fn handle_async(
+        &self,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        if self.blocking {
+            self.handle_async_with_sync_blocking(handle_args).await
+        } else {
+            self.handle_async_with_sync(handle_args).await
+        }
+    }
+    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
+    }
+}
+impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerTypes
+    for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
+where
+    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    Context: IntoContext,
+    Params: Send + Sync,
+    InheritedParams: Send + Sync,
+{
+    type Params = Params;
+    type InheritedParams = InheritedParams;
+    type Ok = T;
+    type Err = E;
+}
+#[async_trait::async_trait]
+impl<F, Fut, T, E, Context, Params, InheritedParams> Handler
+    for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
+where
+    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<T, E>> + Send + 'static,
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    Context: IntoContext,
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+{
+    type Context = Context;
+    async fn handle_async(
+        &self,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        (self.function)(handle_args).await
+    }
+    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+        self.metadata.clone()
     }
 }
 
@@ -144,12 +246,12 @@ where
     E: Send + Sync + 'static,
 {
     type Context = AnyContext;
-    fn handle_sync(&self, _: HandleArgs<Self::Context, Self>) -> Result<Self::Ok, Self::Err> {
+    fn handle_sync(&self, _: HandlerArgsFor<Self::Context, Self>) -> Result<Self::Ok, Self::Err> {
         (self.function)()
     }
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -184,7 +286,7 @@ where
     type Context = AnyContext;
     async fn handle_async(
         &self,
-        _: HandleArgs<Self::Context, Self>,
+        _: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)().await
     }
@@ -216,13 +318,13 @@ where
     type Context = Context;
     fn handle_sync(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args.context)
     }
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -259,7 +361,7 @@ where
     type Context = Context;
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args.context).await
     }
@@ -293,16 +395,16 @@ where
     type Context = Context;
     fn handle_sync(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        let HandleArgs {
+        let HandlerArgs {
             context, params, ..
         } = handle_args;
         (self.function)(context, params)
     }
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -341,9 +443,9 @@ where
     type Context = Context;
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        let HandleArgs {
+        let HandlerArgs {
             context, params, ..
         } = handle_args;
         (self.function)(context, params).await
@@ -382,9 +484,9 @@ where
     type Context = Context;
     fn handle_sync(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        let HandleArgs {
+        let HandlerArgs {
             context,
             params,
             inherited_params,
@@ -394,7 +496,7 @@ where
     }
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -437,9 +539,9 @@ where
     type Context = Context;
     async fn handle_async(
         &self,
-        handle_args: HandleArgs<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        let HandleArgs {
+        let HandlerArgs {
             context,
             params,
             inherited_params,
