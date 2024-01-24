@@ -110,11 +110,13 @@ pub async fn call_remote_http(
         req = req.header("accept", "application/json");
         body = serde_json::to_vec(&req)?;
     }
+    dbg!();
     let res = req
         .header("content-length", body.len())
         .body(body)
         .send()
         .await?;
+    dbg!();
 
     match res
         .headers()
