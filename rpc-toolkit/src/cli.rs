@@ -112,7 +112,6 @@ pub async fn call_remote_http(
         body = serde_json::to_vec(&rpc_req)?;
     }
     let res = req
-        .timeout(Duration::from_secs(30))
         .header("content-length", body.len())
         .body(body)
         .send()
