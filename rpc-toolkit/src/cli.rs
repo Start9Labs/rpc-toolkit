@@ -1,6 +1,7 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
 use std::ffi::OsString;
+use std::time::Duration;
 
 use clap::{CommandFactory, FromArgMatches};
 use imbl_value::Value;
@@ -110,8 +111,8 @@ pub async fn call_remote_http(
         req = req.header("accept", "application/json");
         body = serde_json::to_vec(&req)?;
     }
-    dbg!();
-    let res = req
+    let res = dbg!(req)
+        .timeout(Duration::from_secs(30))
         .header("content-length", body.len())
         .body(body)
         .send()
