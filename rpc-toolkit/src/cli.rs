@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use clap::{CommandFactory, FromArgMatches};
 use imbl_value::Value;
+use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Client, Method};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -101,25 +102,25 @@ pub async fn call_remote_http(
     let body;
     #[cfg(feature = "cbor")]
     {
-        req = req.header("content-type", "application/cbor");
-        req = req.header("accept", "application/cbor, application/json");
+        req = req.header(CONTENT_TYPE, "application/cbor");
+        req = req.header(ACCEPT, "application/cbor, application/json");
         body = serde_cbor::to_vec(&rpc_req)?;
     }
     #[cfg(not(feature = "cbor"))]
     {
-        req = req.header("content-type", "application/json");
-        req = req.header("accept", "application/json");
+        req = req.header(CONTENT_TYPE, "application/json");
+        req = req.header(ACCEPT, "application/json");
         body = serde_json::to_vec(&rpc_req)?;
     }
     let res = req
-        .header("content-length", body.len())
+        .header(CONTENT_LENGTH, body.len())
         .body(body)
         .send()
         .await?;
 
     match res
         .headers()
-        .get("content-type")
+        .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
     {
         Some("application/json") => {

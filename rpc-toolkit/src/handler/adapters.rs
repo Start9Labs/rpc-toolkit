@@ -650,14 +650,16 @@ where
             raw_params,
         }: HandlerArgsFor<Self::Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
-            raw_params,
-        })
+        self.handler
+            .handle_async(HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params: (self.inherit)(inherited_params.0, inherited_params.1),
+                raw_params,
+            })
+            .await
     }
     fn metadata(
         &self,
