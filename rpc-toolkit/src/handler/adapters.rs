@@ -502,8 +502,7 @@ where
                 match context
                     .call_remote(
                         &full_method.join("."),
-                        imbl_value::to_value(&Flat(params, inherited_params))
-                            .map_err(parse_error)?,
+                        imbl_value::to_value(&raw_params).map_err(parse_error)?,
                     )
                     .await
                 {
