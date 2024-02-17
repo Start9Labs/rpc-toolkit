@@ -1,7 +1,6 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::time::Duration;
 
 use clap::{CommandFactory, FromArgMatches};
 use imbl_value::Value;
@@ -13,7 +12,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use url::Url;
 use yajrc::{Id, RpcError};
 
-use crate::util::{internal_error, parse_error, Flat, PhantomData};
+use crate::util::{internal_error, parse_error, PhantomData};
 use crate::{
     AnyHandler, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
     HandlerArgsFor, HandlerTypes, IntoContext, Name, ParentHandler, PrintCliResult,
@@ -226,11 +225,7 @@ where
             .collect::<Vec<_>>();
         match handle_args
             .context
-            .call_remote(
-                &full_method.join("."),
-                imbl_value::to_value(&Flat(handle_args.params, handle_args.inherited_params))
-                    .map_err(parse_error)?,
-            )
+            .call_remote(&full_method.join("."), handle_args.raw_params.clone())
             .await
         {
             Ok(a) => imbl_value::from_value(a)

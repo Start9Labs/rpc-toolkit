@@ -500,10 +500,7 @@ where
             EitherContext::C1(context) => {
                 let full_method = parent_method.into_iter().chain(method).collect::<Vec<_>>();
                 match context
-                    .call_remote(
-                        &full_method.join("."),
-                        imbl_value::to_value(&raw_params).map_err(parse_error)?,
-                    )
+                    .call_remote(&full_method.join("."), raw_params.clone())
                     .await
                 {
                     Ok(a) => imbl_value::from_value(a)
