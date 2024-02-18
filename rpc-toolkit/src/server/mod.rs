@@ -8,7 +8,7 @@ use imbl_value::{InOMap, Value};
 use yajrc::{RpcError, RpcMethod};
 
 use crate::util::{invalid_request, JobRunner};
-use crate::{AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
+use crate::{AnyHandler, Empty, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
 
 pub type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
 pub type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
@@ -66,7 +66,7 @@ impl<Context: crate::Context> Server<Context> {
                     parent_method: VecDeque::new(),
                     method: method.ok_or_else(|| yajrc::METHOD_NOT_FOUND_ERROR)?,
                     params,
-                    inherited: Value::Object(InOMap::new()),
+                    inherited: crate::Empty {},
                 })
                 .await
         }

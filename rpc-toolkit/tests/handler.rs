@@ -159,7 +159,7 @@ fn make_api() -> ParentHandler {
         .subcommand(
             "fizz",
             ParentHandler::<InheritParams>::new().root_handler(
-                from_fn(|c: CliContext, _, InheritParams { donde }| {
+                from_fn(|c: CliContext, _: Empty, InheritParams { donde }| {
                     Ok::<_, RpcError>(
                         format!(
                             "Root Command: Host {host} Donde = {donde}",
@@ -174,7 +174,7 @@ fn make_api() -> ParentHandler {
         .subcommand(
             "error",
             ParentHandler::<InheritParams>::new().root_handler(
-                from_fn(|c: CliContext, _, InheritParams { donde }| {
+                from_fn(|c: CliContext, _: Empty, InheritParams { donde }| {
                     Err::<String, _>(RpcError {
                         code: 1,
                         message: "This is an example message".into(),

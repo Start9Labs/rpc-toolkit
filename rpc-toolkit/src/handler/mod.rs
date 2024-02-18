@@ -21,21 +21,20 @@ pub use adapters::*;
 pub use from_fn::*;
 pub use parent::*;
 
-pub(crate) struct HandleAnyArgs {
+pub(crate) struct HandleAnyArgs<Inherited> {
     pub(crate) context: AnyContext,
     pub(crate) parent_method: VecDeque<&'static str>,
     pub(crate) method: VecDeque<&'static str>,
     pub(crate) params: Value,
-    pub(crate) inherited: Value,
+    pub(crate) inherited: Inherited,
 }
-impl HandleAnyArgs {
+impl<Inherited: Send + Sync> HandleAnyArgs<Inherited> {
     fn downcast<Context: IntoContext, H>(
         self,
     ) -> Result<HandlerArgsFor<Context, H>, imbl_value::Error>
     where
-        H: HandlerTypes,
+        H: HandlerTypes<InheritedParams = Inherited>,
         H::Params: DeserializeOwned,
-        H::InheritedParams: DeserializeOwned,
     {
         let Self {
             context,
@@ -52,7 +51,7 @@ impl HandleAnyArgs {
             parent_method,
             method,
             params: imbl_value::from_value(params.clone())?,
-            inherited_params: imbl_value::from_value(inherited.clone())?,
+            inherited_params: inherited,
             raw_params: params,
         })
     }
@@ -60,8 +59,12 @@ impl HandleAnyArgs {
 
 #[async_trait::async_trait]
 pub(crate) trait HandleAny: Send + Sync {
-    fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
-    async fn handle_async(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError>;
+    type Inherited: Send;
+    fn handle_sync(&self, handle_args: HandleAnyArgs<Self::Inherited>) -> Result<Value, RpcError>;
+    async fn handle_async(
+        &self,
+        handle_args: HandleAnyArgs<Self::Inherited>,
+    ) -> Result<Value, RpcError>;
     fn metadata(
         &self,
         method: VecDeque<&'static str>,
@@ -71,10 +74,14 @@ pub(crate) trait HandleAny: Send + Sync {
 }
 #[async_trait::async_trait]
 impl<T: HandleAny> HandleAny for Arc<T> {
-    fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
+    type Inherited = T::Inherited;
+    fn handle_sync(&self, handle_args: HandleAnyArgs<Self::Inherited>) -> Result<Value, RpcError> {
         self.deref().handle_sync(handle_args)
     }
-    async fn handle_async(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
+    async fn handle_async(
+        &self,
+        handle_args: HandleAnyArgs<Self::Inherited>,
+    ) -> Result<Value, RpcError> {
         self.deref().handle_async(handle_args).await
     }
     fn metadata(
@@ -90,13 +97,18 @@ impl<T: HandleAny> HandleAny for Arc<T> {
 }
 
 pub(crate) trait CliBindingsAny {
+    type Inherited;
     fn cli_command(&self, ctx_ty: TypeId) -> Command;
     fn cli_parse(
         &self,
         matches: &ArgMatches,
         ctx_ty: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error>;
-    fn cli_display(&self, handle_args: HandleAnyArgs, result: Value) -> Result<(), RpcError>;
+    fn cli_display(
+        &self,
+        handle_args: HandleAnyArgs<Self::Inherited>,
+        result: Value,
+    ) -> Result<(), RpcError>;
 }
 
 pub trait CliBindings: HandlerTypes {
@@ -172,24 +184,41 @@ where
     }
 }
 
-pub(crate) trait HandleAnyWithCli: HandleAny + CliBindingsAny {}
-impl<T: HandleAny + CliBindingsAny> HandleAnyWithCli for T {}
+pub(crate) trait HandleAnyWithCli<Inherited>:
+    HandleAny<Inherited = Inherited> + CliBindingsAny<Inherited = Inherited>
+{
+}
+impl<Inherited, T: HandleAny<Inherited = Inherited> + CliBindingsAny<Inherited = Inherited>>
+    HandleAnyWithCli<Inherited> for T
+{
+}
 
-#[derive(Clone)]
 #[allow(private_interfaces)]
-pub enum DynHandler {
-    WithoutCli(Arc<dyn HandleAny>),
-    WithCli(Arc<dyn HandleAnyWithCli>),
+pub enum DynHandler<Inherited> {
+    WithoutCli(Arc<dyn HandleAny<Inherited = Inherited>>),
+    WithCli(Arc<dyn HandleAnyWithCli<Inherited>>),
+}
+impl<Inherited> Clone for DynHandler<Inherited> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::WithCli(a) => Self::WithCli(a.clone()),
+            Self::WithoutCli(a) => Self::WithoutCli(a.clone()),
+        }
+    }
 }
 #[async_trait::async_trait]
-impl HandleAny for DynHandler {
-    fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
+impl<Inherited: Send> HandleAny for DynHandler<Inherited> {
+    type Inherited = Inherited;
+    fn handle_sync(&self, handle_args: HandleAnyArgs<Self::Inherited>) -> Result<Value, RpcError> {
         match self {
             DynHandler::WithoutCli(h) => h.handle_sync(handle_args),
             DynHandler::WithCli(h) => h.handle_sync(handle_args),
         }
     }
-    async fn handle_async(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
+    async fn handle_async(
+        &self,
+        handle_args: HandleAnyArgs<Self::Inherited>,
+    ) -> Result<Value, RpcError> {
         match self {
             DynHandler::WithoutCli(h) => h.handle_async(handle_args).await,
             DynHandler::WithCli(h) => h.handle_async(handle_args).await,
@@ -309,11 +338,11 @@ impl<H: std::fmt::Debug> std::fmt::Debug for AnyHandler<H> {
 impl<H: Handler> HandleAny for AnyHandler<H>
 where
     H::Params: DeserializeOwned,
-    H::InheritedParams: DeserializeOwned,
     H::Ok: Serialize,
     RpcError: From<H::Err>,
 {
-    fn handle_sync(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
+    type Inherited = H::InheritedParams;
+    fn handle_sync(&self, handle_args: HandleAnyArgs<Self::Inherited>) -> Result<Value, RpcError> {
         imbl_value::to_value(
             &self
                 .0
@@ -321,7 +350,10 @@ where
         )
         .map_err(internal_error)
     }
-    async fn handle_async(&self, handle_args: HandleAnyArgs) -> Result<Value, RpcError> {
+    async fn handle_async(
+        &self,
+        handle_args: HandleAnyArgs<Self::Inherited>,
+    ) -> Result<Value, RpcError> {
         imbl_value::to_value(
             &self
                 .0
@@ -346,10 +378,10 @@ impl<H: CliBindings> CliBindingsAny for AnyHandler<H>
 where
     H: CliBindings,
     H::Params: DeserializeOwned,
-    H::InheritedParams: DeserializeOwned,
     H::Ok: Serialize + DeserializeOwned,
     RpcError: From<H::Err>,
 {
+    type Inherited = H::InheritedParams;
     fn cli_command(&self, ctx_ty: TypeId) -> Command {
         self.0.cli_command(ctx_ty)
     }
@@ -360,7 +392,11 @@ where
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
         self.0.cli_parse(matches, ctx_ty)
     }
-    fn cli_display(&self, handle_args: HandleAnyArgs, result: Value) -> Result<(), RpcError> {
+    fn cli_display(
+        &self,
+        handle_args: HandleAnyArgs<Self::Inherited>,
+        result: Value,
+    ) -> Result<(), RpcError> {
         self.0
             .cli_display(
                 handle_args.downcast::<_, H>().map_err(invalid_params)?,
@@ -373,9 +409,19 @@ where
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
 pub struct Empty {}
 
-pub(crate) trait OrEmpty<T> {}
-impl<T> OrEmpty<T> for T {}
-impl<A, B> OrEmpty<Flat<A, B>> for Empty {}
+pub(crate) trait OrEmpty<T> {
+    fn from_t(t: T) -> Self;
+}
+impl<T> OrEmpty<T> for T {
+    fn from_t(t: T) -> Self {
+        t
+    }
+}
+impl<A, B> OrEmpty<Flat<A, B>> for Empty {
+    fn from_t(t: Flat<A, B>) -> Self {
+        Empty {}
+    }
+}
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
 pub enum Never {}

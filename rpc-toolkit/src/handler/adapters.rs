@@ -10,11 +10,11 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
 
-use crate::util::{internal_error, parse_error, Flat, PhantomData};
+use crate::util::{internal_error, Flat, PhantomData};
 use crate::{
     iter_from_ctx_and_handler, AnyContext, AnyHandler, CallRemote, CliBindings, DynHandler,
     EitherContext, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext, IntoHandlers,
-    PrintCliResult,
+    OrEmpty, PrintCliResult,
 };
 
 pub trait HandlerExt: Handler + Sized {
@@ -106,18 +106,22 @@ impl<H: HandlerTypes> HandlerTypes for NoCli<H> {
     type Ok = H::Ok;
     type Err = H::Err;
 }
-impl<H> IntoHandlers for NoCli<H>
+impl<H, A, B> IntoHandlers<Flat<A, B>> for NoCli<H>
 where
     H: Handler,
     H::Params: DeserializeOwned,
-    H::InheritedParams: DeserializeOwned,
+    H::InheritedParams: OrEmpty<Flat<A, B>>,
     H::Ok: Serialize + DeserializeOwned,
     RpcError: From<H::Err>,
+    A: Send + Sync + 'static,
+    B: Send + Sync + 'static,
 {
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler)> {
+    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler<Flat<A, B>>)> {
         iter_from_ctx_and_handler(
             self.0.contexts(),
-            DynHandler::WithoutCli(Arc::new(AnyHandler::new(self.0))),
+            DynHandler::WithoutCli(Arc::new(AnyHandler::new(
+                self.0.with_inherited(|a, b| OrEmpty::from_t(Flat(a, b))),
+            ))),
         )
     }
 }

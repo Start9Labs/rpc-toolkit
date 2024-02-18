@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use imbl_value::imbl::{OrdMap, OrdSet};
-use imbl_value::{to_value, Value};
+use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
@@ -12,33 +12,37 @@ use yajrc::RpcError;
 use crate::util::{combine, Flat, PhantomData};
 use crate::{
     AnyContext, AnyHandler, CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler,
-    HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext, OrEmpty,
+    HandlerArgs, HandlerArgsFor, HandlerExt, HandlerTypes, IntoContext, OrEmpty,
 };
 
-pub trait IntoHandlers: HandlerTypes {
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler)>;
+pub trait IntoHandlers<Inherited>: HandlerTypes {
+    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler<Inherited>)>;
 }
 
-impl<H> IntoHandlers for H
+impl<H, A, B> IntoHandlers<Flat<A, B>> for H
 where
     H: Handler + CliBindings,
     H::Params: DeserializeOwned,
-    H::InheritedParams: DeserializeOwned,
+    H::InheritedParams: OrEmpty<Flat<A, B>>,
     H::Ok: Serialize + DeserializeOwned,
     RpcError: From<H::Err>,
+    A: Send + Sync + 'static,
+    B: Send + Sync + 'static,
 {
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler)> {
+    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler<Flat<A, B>>)> {
         iter_from_ctx_and_handler(
             intersect_type_ids(self.contexts(), <Self as CliBindings>::Context::type_ids()),
-            DynHandler::WithCli(Arc::new(AnyHandler::new(self))),
+            DynHandler::WithCli(Arc::new(AnyHandler::new(
+                self.with_inherited(|a, b| OrEmpty::from_t(Flat(a, b))),
+            ))),
         )
     }
 }
 
-pub(crate) fn iter_from_ctx_and_handler(
+pub(crate) fn iter_from_ctx_and_handler<Inherited>(
     ctx: Option<OrdSet<TypeId>>,
-    handler: DynHandler,
-) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler)> {
+    handler: DynHandler<Inherited>,
+) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler<Inherited>)> {
     if let Some(ctx) = ctx {
         itertools::Either::Left(ctx.into_iter().map(Some))
     } else {
@@ -67,13 +71,19 @@ impl<'a> std::borrow::Borrow<Option<&'a str>> for Name {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct SubcommandMap(pub(crate) OrdMap<Name, OrdMap<Option<TypeId>, DynHandler>>);
-impl SubcommandMap {
+pub(crate) struct SubcommandMap<Inherited>(
+    pub(crate) OrdMap<Name, OrdMap<Option<TypeId>, DynHandler<Inherited>>>,
+);
+impl<Inherited> Clone for SubcommandMap<Inherited> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+impl<Inherited> SubcommandMap<Inherited> {
     fn insert(
         &mut self,
         name: Option<&'static str>,
-        handlers: impl IntoIterator<Item = (Option<TypeId>, DynHandler)>,
+        handlers: impl IntoIterator<Item = (Option<TypeId>, DynHandler<Inherited>)>,
     ) {
         let mut for_name = self.0.remove(&name).unwrap_or_default();
         for (ctx_ty, handler) in handlers {
@@ -82,7 +92,11 @@ impl SubcommandMap {
         self.0.insert(Name(name), for_name);
     }
 
-    fn get<'a>(&'a self, ctx_ty: TypeId, name: Option<&str>) -> Option<(Name, &'a DynHandler)> {
+    fn get<'a>(
+        &'a self,
+        ctx_ty: TypeId,
+        name: Option<&str>,
+    ) -> Option<(Name, &'a DynHandler<Inherited>)> {
         if let Some((name, for_name)) = self.0.get_key_value(&name) {
             if let Some(for_ctx) = for_name.get(&Some(ctx_ty)) {
                 Some((*name, for_ctx))
@@ -96,8 +110,8 @@ impl SubcommandMap {
 }
 
 pub struct ParentHandler<Params = Empty, InheritedParams = Empty> {
-    _phantom: PhantomData<(Params, InheritedParams)>,
-    pub(crate) subcommands: SubcommandMap,
+    _phantom: PhantomData<Params>,
+    pub(crate) subcommands: SubcommandMap<Flat<Params, InheritedParams>>,
     metadata: OrdMap<&'static str, Value>,
 }
 impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
@@ -141,8 +155,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     #[allow(private_bounds)]
     pub fn subcommand<H>(mut self, name: &'static str, handler: H) -> Self
     where
-        H: IntoHandlers,
-        H::InheritedParams: OrEmpty<Flat<Params, InheritedParams>>,
+        H: IntoHandlers<Flat<Params, InheritedParams>>,
     {
         self.subcommands
             .insert(name.into(), handler.into_handlers());
@@ -151,8 +164,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     #[allow(private_bounds)]
     pub fn root_handler<H>(mut self, handler: H) -> Self
     where
-        H: IntoHandlers<Params = Empty>,
-        H::InheritedParams: OrEmpty<Flat<Params, InheritedParams>>,
+        H: IntoHandlers<Flat<Params, InheritedParams>>,
     {
         self.subcommands.insert(None, handler.into_handlers());
         self
@@ -182,9 +194,9 @@ where
             context,
             mut parent_method,
             mut method,
+            params,
             inherited_params,
             raw_params,
-            ..
         }: HandlerArgsFor<AnyContext, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
@@ -197,7 +209,7 @@ where
                 parent_method,
                 method,
                 params: raw_params,
-                inherited: to_value(&inherited_params)?,
+                inherited: Flat(params, inherited_params),
             })
         } else {
             Err(yajrc::METHOD_NOT_FOUND_ERROR)
@@ -209,9 +221,9 @@ where
             context,
             mut parent_method,
             mut method,
+            params,
             inherited_params,
             raw_params,
-            ..
         }: HandlerArgsFor<AnyContext, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
@@ -225,7 +237,7 @@ where
                     parent_method,
                     method,
                     params: raw_params,
-                    inherited: to_value(&inherited_params)?,
+                    inherited: Flat(params, inherited_params),
                 })
                 .await
         } else {
@@ -330,9 +342,9 @@ where
             context,
             mut parent_method,
             mut method,
+            params,
             inherited_params,
             raw_params,
-            ..
         }: HandlerArgsFor<AnyContext, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -349,7 +361,7 @@ where
                     parent_method,
                     method,
                     params: raw_params,
-                    inherited: to_value(&inherited_params)?,
+                    inherited: Flat(params, inherited_params),
                 },
                 result,
             )

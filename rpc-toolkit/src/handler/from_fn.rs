@@ -461,7 +461,7 @@ where
     Context: IntoContext,
     F: Fn(Context, Params, InheritedParams) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
-    InheritedParams: DeserializeOwned + Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
@@ -477,7 +477,7 @@ where
     Context: IntoContext,
     F: Fn(Context, Params, InheritedParams) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
-    InheritedParams: DeserializeOwned + Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
@@ -515,7 +515,7 @@ where
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
-    InheritedParams: DeserializeOwned + Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
@@ -532,7 +532,7 @@ where
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
-    InheritedParams: DeserializeOwned + Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {

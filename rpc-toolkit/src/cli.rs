@@ -67,7 +67,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
             parent_method: VecDeque::new(),
             method: method.clone(),
             params: params.clone(),
-            inherited: Value::Object(InOMap::new()),
+            inherited: crate::Empty {},
         })?;
         root_handler.cli_display(
             HandleAnyArgs {
@@ -75,7 +75,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
                 parent_method: VecDeque::new(),
                 method,
                 params,
-                inherited: Value::Object(InOMap::new()),
+                inherited: crate::Empty {},
             },
             res,
         )?;
