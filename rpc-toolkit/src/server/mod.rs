@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use futures::future::{join_all, BoxFuture};
 use futures::{Future, FutureExt, Stream, StreamExt};
-use imbl_value::Value;
+use imbl_value::{InOMap, Value};
 use yajrc::{RpcError, RpcMethod};
 
 use crate::util::{invalid_request, JobRunner};
@@ -66,6 +66,7 @@ impl<Context: crate::Context> Server<Context> {
                     parent_method: VecDeque::new(),
                     method: method.ok_or_else(|| yajrc::METHOD_NOT_FOUND_ERROR)?,
                     params,
+                    inherited: Value::Object(InOMap::new()),
                 })
                 .await
         }

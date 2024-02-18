@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::ffi::OsString;
 
 use clap::{CommandFactory, FromArgMatches};
-use imbl_value::Value;
+use imbl_value::{InOMap, Value};
 use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Client, Method};
 use serde::de::DeserializeOwned;
@@ -67,6 +67,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
             parent_method: VecDeque::new(),
             method: method.clone(),
             params: params.clone(),
+            inherited: Value::Object(InOMap::new()),
         })?;
         root_handler.cli_display(
             HandleAnyArgs {
@@ -74,6 +75,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
                 parent_method: VecDeque::new(),
                 method,
                 params,
+                inherited: Value::Object(InOMap::new()),
             },
             res,
         )?;

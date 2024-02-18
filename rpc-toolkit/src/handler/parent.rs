@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use imbl_value::imbl::{OrdMap, OrdSet};
-use imbl_value::Value;
+use imbl_value::{to_value, Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
@@ -172,7 +172,7 @@ where
 #[async_trait::async_trait]
 impl<Params, InheritedParams> Handler for ParentHandler<Params, InheritedParams>
 where
-    Params: Serialize + Send + Sync + 'static,
+    Params: Send + Sync + 'static,
     InheritedParams: Serialize + Send + Sync + 'static,
 {
     type Context = AnyContext;
@@ -182,6 +182,7 @@ where
             context,
             mut parent_method,
             mut method,
+            inherited_params,
             raw_params,
             ..
         }: HandlerArgsFor<AnyContext, Self>,
@@ -196,6 +197,7 @@ where
                 parent_method,
                 method,
                 params: raw_params,
+                inherited: to_value(&inherited_params)?,
             })
         } else {
             Err(yajrc::METHOD_NOT_FOUND_ERROR)
@@ -207,6 +209,7 @@ where
             context,
             mut parent_method,
             mut method,
+            inherited_params,
             raw_params,
             ..
         }: HandlerArgsFor<AnyContext, Self>,
@@ -222,6 +225,7 @@ where
                     parent_method,
                     method,
                     params: raw_params,
+                    inherited: to_value(&inherited_params)?,
                 })
                 .await
         } else {
@@ -326,6 +330,7 @@ where
             context,
             mut parent_method,
             mut method,
+            inherited_params,
             raw_params,
             ..
         }: HandlerArgsFor<AnyContext, Self>,
@@ -344,6 +349,7 @@ where
                     parent_method,
                     method,
                     params: raw_params,
+                    inherited: to_value(&inherited_params)?,
                 },
                 result,
             )

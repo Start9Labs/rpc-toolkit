@@ -26,6 +26,7 @@ pub(crate) struct HandleAnyArgs {
     pub(crate) parent_method: VecDeque<&'static str>,
     pub(crate) method: VecDeque<&'static str>,
     pub(crate) params: Value,
+    pub(crate) inherited: Value,
 }
 impl HandleAnyArgs {
     fn downcast<Context: IntoContext, H>(
@@ -41,6 +42,7 @@ impl HandleAnyArgs {
             parent_method,
             method,
             params,
+            inherited,
         } = self;
         Ok(HandlerArgs {
             context: Context::downcast(context).map_err(|_| imbl_value::Error {
@@ -50,7 +52,7 @@ impl HandleAnyArgs {
             parent_method,
             method,
             params: imbl_value::from_value(params.clone())?,
-            inherited_params: imbl_value::from_value(params.clone())?,
+            inherited_params: imbl_value::from_value(inherited.clone())?,
             raw_params: params,
         })
     }
