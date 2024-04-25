@@ -40,7 +40,7 @@ pub trait HandlerExt: Handler + Sized {
     ) -> InheritanceHandler<Params, InheritedParams, Self, F>
     where
         F: Fn(Params, InheritedParams) -> Self::InheritedParams;
-    fn with_remote_cli<Context>(self) -> RemoteCli<Context, Self>;
+    fn with_call_remote<Context>(self) -> RemoteCaller<Context, Self>;
 }
 
 impl<T: Handler + Sized> HandlerExt for T {
@@ -90,8 +90,8 @@ impl<T: Handler + Sized> HandlerExt for T {
             inherit: f,
         }
     }
-    fn with_remote_cli<Context>(self) -> RemoteCli<Context, Self> {
-        RemoteCli {
+    fn with_call_remote<Context>(self) -> RemoteCaller<Context, Self> {
+        RemoteCaller {
             _phantom: PhantomData::new(),
             handler: self,
         }
@@ -452,11 +452,11 @@ where
     }
 }
 
-pub struct RemoteCli<Context, H> {
+pub struct RemoteCaller<Context, H> {
     _phantom: PhantomData<Context>,
     handler: H,
 }
-impl<Context, H: Clone> Clone for RemoteCli<Context, H> {
+impl<Context, H: Clone> Clone for RemoteCaller<Context, H> {
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -464,12 +464,12 @@ impl<Context, H: Clone> Clone for RemoteCli<Context, H> {
         }
     }
 }
-impl<Context, H: Debug> Debug for RemoteCli<Context, H> {
+impl<Context, H: Debug> Debug for RemoteCaller<Context, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RemoteCli").field(&self.handler).finish()
+        f.debug_tuple("RemoteCaller").field(&self.handler).finish()
     }
 }
-impl<Context, H> HandlerTypes for RemoteCli<Context, H>
+impl<Context, H> HandlerTypes for RemoteCaller<Context, H>
 where
     H: HandlerTypes,
 {
@@ -479,9 +479,9 @@ where
     type Err = H::Err;
 }
 #[async_trait::async_trait]
-impl<Context, H> Handler for RemoteCli<Context, H>
+impl<Context, H> Handler for RemoteCaller<Context, H>
 where
-    Context: CallRemote,
+    Context: CallRemote<H::Context>,
     H: Handler,
     H::Params: Serialize,
     H::InheritedParams: Serialize,
@@ -541,7 +541,7 @@ where
         self.handler.method_from_dots(method, ctx_ty)
     }
 }
-impl<Context, H> PrintCliResult for RemoteCli<Context, H>
+impl<Context, H> PrintCliResult for RemoteCaller<Context, H>
 where
     Context: IntoContext,
     H: PrintCliResult,

@@ -1,4 +1,3 @@
-use std::any::TypeId;
 use std::ffi::OsString;
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
@@ -62,7 +61,7 @@ impl Context for CliContext {
     }
 }
 #[async_trait::async_trait]
-impl CallRemote for CliContext {
+impl CallRemote<ServerContext> for CliContext {
     async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
         call_remote_socket(
             tokio::net::UnixStream::connect(&self.0.host).await.unwrap(),
@@ -130,7 +129,7 @@ fn make_api() -> ParentHandler {
                     ))
                 },
             )
-            .with_remote_cli::<CliContext>(),
+            .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "hello",
@@ -174,7 +173,7 @@ fn make_api() -> ParentHandler {
         .subcommand(
             "error",
             ParentHandler::<InheritParams>::new().root_handler(
-                from_fn(|c: CliContext, _: Empty, InheritParams { donde }| {
+                from_fn(|_: CliContext, _: Empty, InheritParams { .. }| {
                     Err::<String, _>(RpcError {
                         code: 1,
                         message: "This is an example message".into(),
@@ -199,14 +198,14 @@ fn test_cli() {
     make_cli()
         .run(
             ["test-cli", "hello", "me"]
-                .into_iter()
+                .iter()
                 .map(|s| OsString::from(s)),
         )
         .unwrap();
     make_cli()
         .run(
             ["test-cli", "fizz", "buzz"]
-                .into_iter()
+                .iter()
                 .map(|s| OsString::from(s)),
         )
         .unwrap();
@@ -230,7 +229,7 @@ async fn test_server() {
                         "echo",
                         "foo",
                     ]
-                    .into_iter()
+                    .iter()
                     .map(|s| OsString::from(s)),
                 )
                 .unwrap();
@@ -242,7 +241,7 @@ async fn test_server() {
                         "echo",
                         "bar",
                     ]
-                    .into_iter()
+                    .iter()
                     .map(|s| OsString::from(s)),
                 )
                 .unwrap();

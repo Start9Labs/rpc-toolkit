@@ -84,7 +84,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
 }
 
 #[async_trait::async_trait]
-pub trait CallRemote: crate::Context {
+pub trait CallRemote<RemoteContext>: crate::Context {
     async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError>;
 }
 
@@ -207,8 +207,9 @@ where
     type Err = RemoteHandler::Err;
 }
 #[async_trait::async_trait]
-impl<Context: CallRemote, RemoteHandler> Handler for CallRemoteHandler<Context, RemoteHandler>
+impl<Context, RemoteHandler> Handler for CallRemoteHandler<Context, RemoteHandler>
 where
+    Context: CallRemote<RemoteHandler::Context>,
     RemoteHandler: Handler,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
@@ -237,9 +238,9 @@ where
         }
     }
 }
-impl<Context: CallRemote, RemoteHandler> PrintCliResult
-    for CallRemoteHandler<Context, RemoteHandler>
+impl<Context, RemoteHandler> PrintCliResult for CallRemoteHandler<Context, RemoteHandler>
 where
+    Context: CallRemote<RemoteHandler::Context>,
     RemoteHandler: PrintCliResult<Context = Context>,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
