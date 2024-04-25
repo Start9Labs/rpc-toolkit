@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches, Parser};
+use futures::Future;
 use imbl_value::imbl::{OrdMap, OrdSet};
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
@@ -267,7 +268,6 @@ pub trait HandlerTypes {
     type Err: Send + Sync;
 }
 
-#[async_trait::async_trait]
 pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
     type Context: IntoContext;
     fn handle_sync(
@@ -279,27 +279,29 @@ pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
             .runtime()
             .block_on(self.handle_async(handle_args))
     }
-    async fn handle_async(
+    fn handle_async(
         &self,
         handle_args: HandlerArgsFor<Self::Context, Self>,
-    ) -> Result<Self::Ok, Self::Err>;
-    async fn handle_async_with_sync(
-        &self,
+    ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send;
+    fn handle_async_with_sync<'a>(
+        &'a self,
         handle_args: HandlerArgsFor<Self::Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handle_sync(handle_args)
+    ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send + 'a {
+        async move { self.handle_sync(handle_args) }
     }
-    async fn handle_async_with_sync_blocking(
-        &self,
+    fn handle_async_with_sync_blocking<'a>(
+        &'a self,
         handle_args: HandlerArgsFor<Self::Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        let s = self.clone();
-        handle_args
-            .context
-            .runtime()
-            .spawn_blocking(move || s.handle_sync(handle_args))
-            .await
-            .unwrap()
+    ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send + 'a {
+        async move {
+            let s = self.clone();
+            handle_args
+                .context
+                .runtime()
+                .spawn_blocking(move || s.handle_sync(handle_args))
+                .await
+                .unwrap()
+        }
     }
     #[allow(unused_variables)]
     fn metadata(

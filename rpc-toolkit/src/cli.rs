@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::ffi::OsString;
 
 use clap::{CommandFactory, FromArgMatches};
+use futures::Future;
 use imbl_value::{InOMap, Value};
 use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Client, Method};
@@ -83,9 +84,12 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
     }
 }
 
-#[async_trait::async_trait]
 pub trait CallRemote<RemoteContext>: crate::Context {
-    async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError>;
+    fn call_remote(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> impl Future<Output = Result<Value, RpcError>> + Send;
 }
 
 pub async fn call_remote_http(
@@ -206,7 +210,7 @@ where
     type Ok = RemoteHandler::Ok;
     type Err = RemoteHandler::Err;
 }
-#[async_trait::async_trait]
+
 impl<Context, RemoteHandler> Handler for CallRemoteHandler<Context, RemoteHandler>
 where
     Context: CallRemote<RemoteHandler::Context>,

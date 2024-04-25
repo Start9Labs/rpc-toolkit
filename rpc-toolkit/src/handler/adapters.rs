@@ -134,7 +134,7 @@ impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[async_trait::async_trait]
+
 impl<H> Handler for NoDisplay<H>
 where
     H: Handler,
@@ -221,7 +221,7 @@ where
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[async_trait::async_trait]
+
 impl<P, H> Handler for CustomDisplay<P, H>
 where
     H: Handler,
@@ -355,7 +355,7 @@ where
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[async_trait::async_trait]
+
 impl<F, H, Context> Handler for CustomDisplayFn<F, H, Context>
 where
     Context: Send + Sync + 'static,
@@ -478,7 +478,7 @@ where
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[async_trait::async_trait]
+
 impl<Context, H> Handler for RemoteCaller<Context, H>
 where
     Context: CallRemote<H::Context>,
@@ -610,7 +610,7 @@ where
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[async_trait::async_trait]
+
 impl<Params, InheritedParams, H, F> Handler for InheritanceHandler<Params, InheritedParams, H, F>
 where
     Params: Send + Sync + 'static,

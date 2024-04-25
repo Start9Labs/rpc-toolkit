@@ -5,7 +5,7 @@ use axum::extract::Request;
 use axum::handler::Handler;
 use axum::response::Response;
 use futures::future::{join_all, BoxFuture};
-use futures::FutureExt;
+use futures::{Future, FutureExt};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http_body_util::BodyExt;
 use imbl_value::imbl::Vector;
@@ -40,30 +40,41 @@ pub fn json_http_response<T: Serialize>(t: &T) -> Response {
         .unwrap_or_else(|_| fallback_rpc_error_response())
 }
 
-#[async_trait::async_trait]
 pub trait Middleware<Context: Send + 'static>: Clone + Send + Sync + 'static {
     type Metadata: DeserializeOwned + Send + 'static;
     #[allow(unused_variables)]
-    async fn process_http_request(
+    fn process_http_request(
         &mut self,
         context: &Context,
         request: &mut Request,
-    ) -> Result<(), Response> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Response>> + Send {
+        async { Ok(()) }
     }
     #[allow(unused_variables)]
-    async fn process_rpc_request(
+    fn process_rpc_request(
         &mut self,
         context: &Context,
         metadata: Self::Metadata,
         request: &mut RpcRequest,
-    ) -> Result<(), RpcResponse> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), RpcResponse>> + Send {
+        async { Ok(()) }
     }
     #[allow(unused_variables)]
-    async fn process_rpc_response(&mut self, context: &Context, response: &mut RpcResponse) {}
+    fn process_rpc_response(
+        &mut self,
+        context: &Context,
+        response: &mut RpcResponse,
+    ) -> impl Future<Output = ()> + Send {
+        async { () }
+    }
     #[allow(unused_variables)]
-    async fn process_http_response(&mut self, context: &Context, response: &mut Response) {}
+    fn process_http_response(
+        &mut self,
+        context: &Context,
+        response: &mut Response,
+    ) -> impl Future<Output = ()> + Send {
+        async { () }
+    }
 }
 
 #[allow(private_bounds)]
@@ -101,7 +112,7 @@ impl<Context: Send + 'static, T: Middleware<Context> + Send + Sync> _Middleware<
         context: &'a Context,
         request: &'a mut Request,
     ) -> BoxFuture<'a, Result<(), Response>> {
-        <Self as Middleware<Context>>::process_http_request(self, context, request)
+        <Self as Middleware<Context>>::process_http_request(self, context, request).boxed()
     }
     fn process_rpc_request<'a>(
         &'a mut self,
@@ -118,20 +129,21 @@ impl<Context: Send + 'static, T: Middleware<Context> + Send + Sync> _Middleware<
             },
             request,
         )
+        .boxed()
     }
     fn process_rpc_response<'a>(
         &'a mut self,
         context: &'a Context,
         response: &'a mut RpcResponse,
     ) -> BoxFuture<'a, ()> {
-        <Self as Middleware<Context>>::process_rpc_response(self, context, response)
+        <Self as Middleware<Context>>::process_rpc_response(self, context, response).boxed()
     }
     fn process_http_response<'a>(
         &'a mut self,
         context: &'a Context,
         response: &'a mut Response,
     ) -> BoxFuture<'a, ()> {
-        <Self as Middleware<Context>>::process_http_response(self, context, response)
+        <Self as Middleware<Context>>::process_http_response(self, context, response).boxed()
     }
 }
 

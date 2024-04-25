@@ -151,7 +151,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<F, T, E, Context, Params, InheritedParams> Handler
     for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
@@ -203,7 +203,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<F, Fut, T, E, Context, Params, InheritedParams> Handler
     for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
@@ -238,7 +238,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<F, T, E> Handler for FromFn<F, T, E, ()>
 where
     F: Fn() -> Result<T, E> + Send + Sync + Clone + 'static,
@@ -275,7 +275,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<F, Fut, T, E> Handler for FromFnAsync<F, Fut, T, E, ()>
 where
     F: Fn() -> Fut + Send + Sync + Clone + 'static,
@@ -307,7 +307,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<Context, F, T, E> Handler for FromFn<F, T, E, (Context,)>
 where
     Context: IntoContext,
@@ -349,7 +349,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<Context, F, Fut, T, E> Handler for FromFnAsync<F, Fut, T, E, (Context,)>
 where
     Context: IntoContext,
@@ -383,7 +383,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<Context, F, T, E, Params> Handler for FromFn<F, T, E, (Context, Params)>
 where
     Context: IntoContext,
@@ -430,7 +430,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<Context, F, Fut, T, E, Params> Handler for FromFnAsync<F, Fut, T, E, (Context, Params)>
 where
     Context: IntoContext,
@@ -470,7 +470,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<Context, F, T, E, Params, InheritedParams> Handler
     for FromFn<F, T, E, (Context, Params, InheritedParams)>
 where
@@ -524,7 +524,7 @@ where
     type Ok = T;
     type Err = E;
 }
-#[async_trait::async_trait]
+
 impl<Context, F, Fut, T, E, Params, InheritedParams> Handler
     for FromFnAsync<F, Fut, T, E, (Context, Params, InheritedParams)>
 where

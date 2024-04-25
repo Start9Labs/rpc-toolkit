@@ -60,7 +60,7 @@ impl Context for CliContext {
         self.0.rt.get().unwrap().handle().clone()
     }
 }
-#[async_trait::async_trait]
+
 impl CallRemote<ServerContext> for CliContext {
     async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
         call_remote_socket(

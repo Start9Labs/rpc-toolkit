@@ -181,7 +181,7 @@ where
     type Ok = Value;
     type Err = RpcError;
 }
-#[async_trait::async_trait]
+
 impl<Params, InheritedParams> Handler for ParentHandler<Params, InheritedParams>
 where
     Params: Send + Sync + 'static,
