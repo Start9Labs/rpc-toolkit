@@ -164,7 +164,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
     #[allow(private_bounds)]
     pub fn root_handler<H>(mut self, handler: H) -> Self
     where
-        H: IntoHandlers<Flat<Params, InheritedParams>>,
+        H: IntoHandlers<Flat<Params, InheritedParams>> + HandlerTypes<Params = Empty>,
     {
         self.subcommands.insert(None, handler.into_handlers());
         self
