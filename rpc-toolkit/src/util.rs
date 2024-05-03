@@ -10,10 +10,21 @@ use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
 pub fn extract<T: DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
-    imbl_value::from_value(value.clone()).map_err(|e| RpcError {
-        data: Some(e.to_string().into()),
-        ..yajrc::INVALID_PARAMS_ERROR
-    })
+    imbl_value::from_value(value.clone()).map_err(invalid_params)
+}
+
+pub fn without<T: Serialize>(value: Value, remove: &T) -> Result<Value, imbl_value::Error> {
+    let to_remove = imbl_value::to_value(remove)?;
+    let (Value::Object(mut value), Value::Object(to_remove)) = (value, to_remove) else {
+        return Err(imbl_value::Error {
+            kind: imbl_value::ErrorKind::Serialization,
+            source: serde_json::Error::custom("params must be object"),
+        });
+    };
+    for k in to_remove.keys() {
+        value.remove(k);
+    }
+    Ok(Value::Object(value))
 }
 
 pub fn combine(v1: Value, v2: Value) -> Result<Value, imbl_value::Error> {
@@ -101,6 +112,49 @@ where
             b: &self.1,
         }
         .serialize(serializer)
+    }
+}
+impl<A, B> clap::CommandFactory for Flat<A, B>
+where
+    A: clap::CommandFactory,
+    B: clap::Args,
+{
+    fn command() -> clap::Command {
+        B::augment_args(A::command())
+    }
+    fn command_for_update() -> clap::Command {
+        B::augment_args_for_update(A::command_for_update())
+    }
+}
+impl<A, B> clap::FromArgMatches for Flat<A, B>
+where
+    A: clap::FromArgMatches,
+    B: clap::FromArgMatches,
+{
+    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self(
+            A::from_arg_matches(matches)?,
+            B::from_arg_matches(matches)?,
+        ))
+    }
+    fn from_arg_matches_mut(matches: &mut clap::ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self(
+            A::from_arg_matches_mut(matches)?,
+            B::from_arg_matches_mut(matches)?,
+        ))
+    }
+    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
+        self.0.update_from_arg_matches(matches)?;
+        self.1.update_from_arg_matches(matches)?;
+        Ok(())
+    }
+    fn update_from_arg_matches_mut(
+        &mut self,
+        matches: &mut clap::ArgMatches,
+    ) -> Result<(), clap::Error> {
+        self.0.update_from_arg_matches_mut(matches)?;
+        self.1.update_from_arg_matches_mut(matches)?;
+        Ok(())
     }
 }
 

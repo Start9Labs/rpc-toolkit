@@ -10,11 +10,11 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
 
-use crate::util::{internal_error, Flat, PhantomData};
+use crate::util::{internal_error, invalid_params, without, Flat, PhantomData};
 use crate::{
     iter_from_ctx_and_handler, AnyContext, AnyHandler, CallRemote, CliBindings, DynHandler,
-    EitherContext, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext, IntoHandlers,
-    OrEmpty, PrintCliResult,
+    EitherContext, Empty, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext,
+    IntoHandlers, OrEmpty, PrintCliResult,
 };
 
 pub trait HandlerExt: Handler + Sized {
@@ -40,7 +40,7 @@ pub trait HandlerExt: Handler + Sized {
     ) -> InheritanceHandler<Params, InheritedParams, Self, F>
     where
         F: Fn(Params, InheritedParams) -> Self::InheritedParams;
-    fn with_call_remote<Context>(self) -> RemoteCaller<Context, Self>;
+    fn with_call_remote<Context, Extra>(self) -> RemoteCaller<Context, Self, Extra>;
 }
 
 impl<T: Handler + Sized> HandlerExt for T {
@@ -90,7 +90,7 @@ impl<T: Handler + Sized> HandlerExt for T {
             inherit: f,
         }
     }
-    fn with_call_remote<Context>(self) -> RemoteCaller<Context, Self> {
+    fn with_call_remote<Context, Extra>(self) -> RemoteCaller<Context, Self, Extra> {
         RemoteCaller {
             _phantom: PhantomData::new(),
             handler: self,
@@ -452,11 +452,11 @@ where
     }
 }
 
-pub struct RemoteCaller<Context, H> {
-    _phantom: PhantomData<Context>,
+pub struct RemoteCaller<Context, H, Extra = Empty> {
+    _phantom: PhantomData<(Context, Extra)>,
     handler: H,
 }
-impl<Context, H: Clone> Clone for RemoteCaller<Context, H> {
+impl<Context, H: Clone, Extra> Clone for RemoteCaller<Context, H, Extra> {
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -464,29 +464,31 @@ impl<Context, H: Clone> Clone for RemoteCaller<Context, H> {
         }
     }
 }
-impl<Context, H: Debug> Debug for RemoteCaller<Context, H> {
+impl<Context, H: Debug, Extra> Debug for RemoteCaller<Context, H, Extra> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RemoteCaller").field(&self.handler).finish()
     }
 }
-impl<Context, H> HandlerTypes for RemoteCaller<Context, H>
+impl<Context, H, Extra> HandlerTypes for RemoteCaller<Context, H, Extra>
 where
     H: HandlerTypes,
+    Extra: Send + Sync + 'static,
 {
-    type Params = H::Params;
+    type Params = Flat<H::Params, Extra>;
     type InheritedParams = H::InheritedParams;
     type Ok = H::Ok;
     type Err = H::Err;
 }
 
-impl<Context, H> Handler for RemoteCaller<Context, H>
+impl<Context, H, Extra> Handler for RemoteCaller<Context, H, Extra>
 where
-    Context: CallRemote<H::Context>,
+    Context: CallRemote<H::Context, Extra>,
     H: Handler,
     H::Params: Serialize,
     H::InheritedParams: Serialize,
     H::Ok: DeserializeOwned,
     H::Err: From<RpcError>,
+    Extra: Serialize + Send + Sync + 'static,
 {
     type Context = EitherContext<Context, H::Context>;
     async fn handle_async(
@@ -495,7 +497,7 @@ where
             context,
             parent_method,
             method,
-            params,
+            params: Flat(params, extra),
             inherited_params,
             raw_params,
         }: HandlerArgsFor<Self::Context, Self>,
@@ -504,7 +506,11 @@ where
             EitherContext::C1(context) => {
                 let full_method = parent_method.into_iter().chain(method).collect::<Vec<_>>();
                 match context
-                    .call_remote(&full_method.join("."), raw_params.clone())
+                    .call_remote(
+                        &full_method.join("."),
+                        without(raw_params, &extra).map_err(invalid_params)?,
+                        extra,
+                    )
                     .await
                 {
                     Ok(a) => imbl_value::from_value(a)
@@ -553,7 +559,7 @@ where
             context,
             parent_method,
             method,
-            params,
+            params: Flat(params, _),
             inherited_params,
             raw_params,
         }: HandlerArgsFor<Self::Context, Self>,

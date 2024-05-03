@@ -15,7 +15,7 @@ use yajrc::{Id, RpcError};
 
 use crate::util::{internal_error, parse_error, PhantomData};
 use crate::{
-    AnyHandler, CliBindingsAny, DynHandler, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
+    AnyHandler, CliBindingsAny, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
     HandlerArgsFor, HandlerTypes, IntoContext, Name, ParentHandler, PrintCliResult,
 };
 
@@ -84,11 +84,12 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
     }
 }
 
-pub trait CallRemote<RemoteContext>: crate::Context {
+pub trait CallRemote<RemoteContext, Extra = Empty>: crate::Context {
     fn call_remote(
         &self,
         method: &str,
         params: Value,
+        extra: Extra,
     ) -> impl Future<Output = Result<Value, RpcError>> + Send;
 }
 
@@ -171,7 +172,7 @@ pub async fn call_remote_socket(
         .result
 }
 
-pub struct CallRemoteHandler<Context, RemoteHandler> {
+struct CallRemoteHandler<Context, RemoteHandler> {
     _phantom: PhantomData<Context>,
     handler: RemoteHandler,
 }
@@ -232,7 +233,11 @@ where
             .collect::<Vec<_>>();
         match handle_args
             .context
-            .call_remote(&full_method.join("."), handle_args.raw_params.clone())
+            .call_remote(
+                &full_method.join("."),
+                handle_args.raw_params.clone(),
+                Empty {},
+            )
             .await
         {
             Ok(a) => imbl_value::from_value(a)

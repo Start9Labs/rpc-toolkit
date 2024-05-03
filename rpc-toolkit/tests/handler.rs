@@ -62,7 +62,7 @@ impl Context for CliContext {
 }
 
 impl CallRemote<ServerContext> for CliContext {
-    async fn call_remote(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+    async fn call_remote(&self, method: &str, params: Value, _: Empty) -> Result<Value, RpcError> {
         call_remote_socket(
             tokio::net::UnixStream::connect(&self.0.host).await.unwrap(),
             method,
@@ -129,7 +129,7 @@ fn make_api() -> ParentHandler {
                     ))
                 },
             )
-            .with_call_remote::<CliContext>(),
+            .with_call_remote::<CliContext, Empty>(),
         )
         .subcommand(
             "hello",
