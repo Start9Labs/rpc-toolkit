@@ -10,4 +10,4 @@ pub mod command_helpers;
 mod context;
 mod handler;
 mod server;
-mod util;
+pub mod util;
