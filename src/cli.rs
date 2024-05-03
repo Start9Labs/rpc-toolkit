@@ -13,7 +13,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use url::Url;
 use yajrc::{Id, RpcError};
 
-use crate::util::{internal_error, parse_error, PhantomData};
+use crate::util::{internal_error, invalid_params, parse_error, without, Flat, PhantomData};
 use crate::{
     AnyHandler, CliBindingsAny, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
     HandlerArgsFor, HandlerTypes, IntoContext, Name, ParentHandler, PrintCliResult,
@@ -172,11 +172,11 @@ pub async fn call_remote_socket(
         .result
 }
 
-struct CallRemoteHandler<Context, RemoteHandler> {
-    _phantom: PhantomData<Context>,
+pub struct CallRemoteHandler<Context, RemoteHandler, Extra = Empty> {
+    _phantom: PhantomData<(Context, Extra)>,
     handler: RemoteHandler,
 }
-impl<Context, RemoteHandler> CallRemoteHandler<Context, RemoteHandler> {
+impl<Context, RemoteHandler, Extra> CallRemoteHandler<Context, RemoteHandler, Extra> {
     pub fn new(handler: RemoteHandler) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -184,7 +184,9 @@ impl<Context, RemoteHandler> CallRemoteHandler<Context, RemoteHandler> {
         }
     }
 }
-impl<Context, RemoteHandler: Clone> Clone for CallRemoteHandler<Context, RemoteHandler> {
+impl<Context, RemoteHandler: Clone, Extra> Clone
+    for CallRemoteHandler<Context, RemoteHandler, Extra>
+{
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -192,34 +194,39 @@ impl<Context, RemoteHandler: Clone> Clone for CallRemoteHandler<Context, RemoteH
         }
     }
 }
-impl<Context, RemoteHandler> std::fmt::Debug for CallRemoteHandler<Context, RemoteHandler> {
+impl<Context, RemoteHandler, Extra> std::fmt::Debug
+    for CallRemoteHandler<Context, RemoteHandler, Extra>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("CallRemoteHandler").finish()
     }
 }
 
-impl<Context, RemoteHandler> HandlerTypes for CallRemoteHandler<Context, RemoteHandler>
+impl<Context, RemoteHandler, Extra> HandlerTypes
+    for CallRemoteHandler<Context, RemoteHandler, Extra>
 where
     RemoteHandler: HandlerTypes,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
     RemoteHandler::Err: From<RpcError>,
+    Extra: Send + Sync + 'static,
 {
-    type Params = RemoteHandler::Params;
+    type Params = Flat<RemoteHandler::Params, Extra>;
     type InheritedParams = RemoteHandler::InheritedParams;
     type Ok = RemoteHandler::Ok;
     type Err = RemoteHandler::Err;
 }
 
-impl<Context, RemoteHandler> Handler for CallRemoteHandler<Context, RemoteHandler>
+impl<Context, RemoteHandler, Extra> Handler for CallRemoteHandler<Context, RemoteHandler, Extra>
 where
-    Context: CallRemote<RemoteHandler::Context>,
+    Context: CallRemote<RemoteHandler::Context, Extra>,
     RemoteHandler: Handler,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
     RemoteHandler::Err: From<RpcError>,
+    Extra: Serialize + Send + Sync + 'static,
 {
     type Context = Context;
     async fn handle_async(
@@ -235,8 +242,9 @@ where
             .context
             .call_remote(
                 &full_method.join("."),
-                handle_args.raw_params.clone(),
-                Empty {},
+                without(handle_args.raw_params.clone(), &handle_args.params.1)
+                    .map_err(invalid_params)?,
+                handle_args.params.1,
             )
             .await
         {
@@ -247,7 +255,8 @@ where
         }
     }
 }
-impl<Context, RemoteHandler> PrintCliResult for CallRemoteHandler<Context, RemoteHandler>
+impl<Context, RemoteHandler, Extra> PrintCliResult
+    for CallRemoteHandler<Context, RemoteHandler, Extra>
 where
     Context: CallRemote<RemoteHandler::Context>,
     RemoteHandler: PrintCliResult<Context = Context>,
@@ -255,6 +264,7 @@ where
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
     RemoteHandler::Err: From<RpcError>,
+    Extra: Send + Sync + 'static,
 {
     type Context = Context;
     fn print(
@@ -274,7 +284,7 @@ where
                 context,
                 parent_method,
                 method,
-                params,
+                params: params.0,
                 inherited_params,
                 raw_params,
             },
