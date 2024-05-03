@@ -129,7 +129,7 @@ fn make_api() -> ParentHandler {
                     ))
                 },
             )
-            .with_call_remote::<CliContext, Empty>(),
+            .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "hello",

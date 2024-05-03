@@ -40,7 +40,7 @@ pub trait HandlerExt: Handler + Sized {
     ) -> InheritanceHandler<Params, InheritedParams, Self, F>
     where
         F: Fn(Params, InheritedParams) -> Self::InheritedParams;
-    fn with_call_remote<Context, Extra>(self) -> RemoteCaller<Context, Self, Extra>;
+    fn with_call_remote<Context>(self) -> RemoteCaller<Context, Self>;
 }
 
 impl<T: Handler + Sized> HandlerExt for T {
@@ -90,7 +90,7 @@ impl<T: Handler + Sized> HandlerExt for T {
             inherit: f,
         }
     }
-    fn with_call_remote<Context, Extra>(self) -> RemoteCaller<Context, Self, Extra> {
+    fn with_call_remote<Context>(self) -> RemoteCaller<Context, Self> {
         RemoteCaller {
             _phantom: PhantomData::new(),
             handler: self,
@@ -452,11 +452,11 @@ where
     }
 }
 
-pub struct RemoteCaller<Context, H, Extra = Empty> {
-    _phantom: PhantomData<(Context, Extra)>,
+pub struct RemoteCaller<Context, H> {
+    _phantom: PhantomData<Context>,
     handler: H,
 }
-impl<Context, H: Clone, Extra> Clone for RemoteCaller<Context, H, Extra> {
+impl<Context, H: Clone> Clone for RemoteCaller<Context, H> {
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -464,31 +464,29 @@ impl<Context, H: Clone, Extra> Clone for RemoteCaller<Context, H, Extra> {
         }
     }
 }
-impl<Context, H: Debug, Extra> Debug for RemoteCaller<Context, H, Extra> {
+impl<Context, H: Debug> Debug for RemoteCaller<Context, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RemoteCaller").field(&self.handler).finish()
     }
 }
-impl<Context, H, Extra> HandlerTypes for RemoteCaller<Context, H, Extra>
+impl<Context, H> HandlerTypes for RemoteCaller<Context, H>
 where
     H: HandlerTypes,
-    Extra: Send + Sync + 'static,
 {
-    type Params = Flat<H::Params, Extra>;
+    type Params = H::Params;
     type InheritedParams = H::InheritedParams;
     type Ok = H::Ok;
     type Err = H::Err;
 }
 
-impl<Context, H, Extra> Handler for RemoteCaller<Context, H, Extra>
+impl<Context, H> Handler for RemoteCaller<Context, H>
 where
-    Context: CallRemote<H::Context, Extra>,
+    Context: CallRemote<H::Context>,
     H: Handler,
     H::Params: Serialize,
     H::InheritedParams: Serialize,
     H::Ok: DeserializeOwned,
     H::Err: From<RpcError>,
-    Extra: Serialize + Send + Sync + 'static,
 {
     type Context = EitherContext<Context, H::Context>;
     async fn handle_async(
@@ -497,7 +495,7 @@ where
             context,
             parent_method,
             method,
-            params: Flat(params, extra),
+            params,
             inherited_params,
             raw_params,
         }: HandlerArgsFor<Self::Context, Self>,
@@ -506,11 +504,7 @@ where
             EitherContext::C1(context) => {
                 let full_method = parent_method.into_iter().chain(method).collect::<Vec<_>>();
                 match context
-                    .call_remote(
-                        &full_method.join("."),
-                        without(raw_params, &extra).map_err(invalid_params)?,
-                        extra,
-                    )
+                    .call_remote(&full_method.join("."), raw_params, Empty {})
                     .await
                 {
                     Ok(a) => imbl_value::from_value(a)
@@ -559,7 +553,7 @@ where
             context,
             parent_method,
             method,
-            params: Flat(params, _),
+            params,
             inherited_params,
             raw_params,
         }: HandlerArgsFor<Self::Context, Self>,
