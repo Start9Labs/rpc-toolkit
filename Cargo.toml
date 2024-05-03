@@ -16,7 +16,7 @@ cbor = ["serde_cbor"]
 default = []
 
 [dependencies]
-axum = "0.7.3"
+axum = "0.7"
 async-stream = "0.3"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
@@ -30,8 +30,7 @@ lazy_format = "2"
 lazy_static = "1.4"
 openssl = { version = "0.10", features = ["vendored"] }
 pin-project = "1"
-reqwest = { version = "0.11" }
-rpc-toolkit-macro = { version = "0.2.2", path = "../rpc-toolkit-macro" }
+reqwest = { version = "0.12" }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11", optional = true }
 serde_json = "1.0"
