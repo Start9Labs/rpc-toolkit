@@ -140,7 +140,7 @@ fn make_api() -> ParentHandler {
         .subcommand("a_hello", from_fn_async(a_hello))
         .subcommand(
             "dondes",
-            ParentHandler::<InheritParams>::new().subcommand(
+            ParentHandler::<AnyContext, InheritParams>::new().subcommand(
                 "donde",
                 from_fn(|c: CliContext, _: (), donde| {
                     Ok::<_, RpcError>(
@@ -157,7 +157,7 @@ fn make_api() -> ParentHandler {
         )
         .subcommand(
             "fizz",
-            ParentHandler::<InheritParams>::new().root_handler(
+            ParentHandler::<AnyContext, InheritParams>::new().root_handler(
                 from_fn(|c: CliContext, _: Empty, InheritParams { donde }| {
                     Ok::<_, RpcError>(
                         format!(
@@ -172,7 +172,7 @@ fn make_api() -> ParentHandler {
         )
         .subcommand(
             "error",
-            ParentHandler::<InheritParams>::new().root_handler(
+            ParentHandler::<AnyContext, InheritParams>::new().root_handler(
                 from_fn(|_: CliContext, _: Empty, InheritParams { .. }| {
                     Err::<String, _>(RpcError {
                         code: 1,

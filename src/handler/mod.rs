@@ -1,9 +1,10 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use clap::{ArgMatches, Command, CommandFactory, FromArgMatches, Parser};
+use clap::{ArgMatches, Command, Parser};
 use futures::Future;
 use imbl_value::imbl::{OrdMap, OrdSet};
 use imbl_value::Value;
@@ -72,6 +73,7 @@ pub(crate) trait HandleAny: Send + Sync {
         ctx_ty: TypeId,
     ) -> OrdMap<&'static str, Value>;
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>>;
+    fn cli(&self) -> Option<&dyn CliBindingsAny<Inherited = Self::Inherited>>;
 }
 #[async_trait::async_trait]
 impl<T: HandleAny> HandleAny for Arc<T> {
@@ -95,6 +97,9 @@ impl<T: HandleAny> HandleAny for Arc<T> {
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
         self.deref().method_from_dots(method, ctx_ty)
     }
+    fn cli(&self) -> Option<&dyn CliBindingsAny<Inherited = Self::Inherited>> {
+        self.deref().cli()
+    }
 }
 
 pub(crate) trait CliBindingsAny {
@@ -112,8 +117,8 @@ pub(crate) trait CliBindingsAny {
     ) -> Result<(), RpcError>;
 }
 
-pub trait CliBindings: HandlerTypes {
-    type Context: IntoContext;
+pub trait CliBindings<Context: IntoContext>: HandlerTypes {
+    const NO_CLI: bool = false;
     fn cli_command(&self, ctx_ty: TypeId) -> Command;
     fn cli_parse(
         &self,
@@ -122,124 +127,57 @@ pub trait CliBindings: HandlerTypes {
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error>;
     fn cli_display(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err>;
 }
 
-pub trait PrintCliResult: HandlerTypes {
-    type Context: IntoContext;
+pub trait PrintCliResult<Context: IntoContext>: HandlerTypes {
     fn print(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err>;
-}
-
-impl<T> CliBindings for T
-where
-    T: HandlerTypes,
-    T::Params: CommandFactory + FromArgMatches + Serialize,
-    T: PrintCliResult,
-{
-    type Context = T::Context;
-    fn cli_command(&self, _: TypeId) -> clap::Command {
-        Self::Params::command()
-    }
-    fn cli_parse(
-        &self,
-        matches: &clap::ArgMatches,
-        _: TypeId,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        Self::Params::from_arg_matches(matches).and_then(|a| {
-            Ok((
-                VecDeque::new(),
-                imbl_value::to_value(&a)
-                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
-            ))
-        })
-    }
-    fn cli_display(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
-        result: Self::Ok,
-    ) -> Result<(), Self::Err> {
-        self.print(
-            HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            },
-            result,
-        )
-    }
-}
-
-pub(crate) trait HandleAnyWithCli<Inherited>:
-    HandleAny<Inherited = Inherited> + CliBindingsAny<Inherited = Inherited>
-{
-}
-impl<Inherited, T: HandleAny<Inherited = Inherited> + CliBindingsAny<Inherited = Inherited>>
-    HandleAnyWithCli<Inherited> for T
-{
 }
 
 #[allow(private_interfaces)]
-pub enum DynHandler<Inherited> {
-    WithoutCli(Arc<dyn HandleAny<Inherited = Inherited>>),
-    WithCli(Arc<dyn HandleAnyWithCli<Inherited>>),
+pub struct DynHandler<Inherited>(Arc<dyn HandleAny<Inherited = Inherited>>);
+impl<Inherited> DynHandler<Inherited> {
+    pub fn iter<C: IntoContext, H: Handler<C> + CliBindings<C>>(
+        h: H,
+    ) -> Option<impl IntoIterator<Item = (Option<TypeId>, Self)>> {
+        iter_from_ctx_and_handler(ctx, handler)
+    }
 }
 impl<Inherited> Clone for DynHandler<Inherited> {
     fn clone(&self) -> Self {
-        match self {
-            Self::WithCli(a) => Self::WithCli(a.clone()),
-            Self::WithoutCli(a) => Self::WithoutCli(a.clone()),
-        }
+        Self(self.0.clone())
     }
 }
 #[async_trait::async_trait]
 impl<Inherited: Send> HandleAny for DynHandler<Inherited> {
     type Inherited = Inherited;
     fn handle_sync(&self, handle_args: HandleAnyArgs<Self::Inherited>) -> Result<Value, RpcError> {
-        match self {
-            DynHandler::WithoutCli(h) => h.handle_sync(handle_args),
-            DynHandler::WithCli(h) => h.handle_sync(handle_args),
-        }
+        self.0.handle_sync(handle_args)
     }
     async fn handle_async(
         &self,
         handle_args: HandleAnyArgs<Self::Inherited>,
     ) -> Result<Value, RpcError> {
-        match self {
-            DynHandler::WithoutCli(h) => h.handle_async(handle_args).await,
-            DynHandler::WithCli(h) => h.handle_async(handle_args).await,
-        }
+        self.0.handle_async(handle_args).await
     }
     fn metadata(
         &self,
         method: VecDeque<&'static str>,
         ctx_ty: TypeId,
     ) -> OrdMap<&'static str, Value> {
-        match self {
-            DynHandler::WithoutCli(h) => h.metadata(method, ctx_ty),
-            DynHandler::WithCli(h) => h.metadata(method, ctx_ty),
-        }
+        self.0.metadata(method, ctx_ty)
     }
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-        match self {
-            DynHandler::WithoutCli(h) => h.method_from_dots(method, ctx_ty),
-            DynHandler::WithCli(h) => h.method_from_dots(method, ctx_ty),
-        }
+        self.0.method_from_dots(method, ctx_ty)
+    }
+    fn cli(&self) -> Option<&dyn CliBindingsAny<Inherited = Self::Inherited>> {
+        self.0.cli()
     }
 }
 
@@ -268,11 +206,10 @@ pub trait HandlerTypes {
     type Err: Send + Sync;
 }
 
-pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
-    type Context: IntoContext;
+pub trait Handler<Context: IntoContext>: HandlerTypes + Clone + Send + Sync + 'static {
     fn handle_sync(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         handle_args
             .context
@@ -281,17 +218,17 @@ pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
     }
     fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send;
     fn handle_async_with_sync<'a>(
         &'a self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send + 'a {
         async move { self.handle_sync(handle_args) }
     }
     fn handle_async_with_sync_blocking<'a>(
         &'a self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send + 'a {
         async move {
             let s = self.clone();
@@ -312,7 +249,7 @@ pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
         OrdMap::new()
     }
     fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        Self::Context::type_ids()
+        Context::type_ids()
     }
     #[allow(unused_variables)]
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
@@ -324,30 +261,40 @@ pub trait Handler: HandlerTypes + Clone + Send + Sync + 'static {
     }
 }
 
-pub(crate) struct AnyHandler<H>(H);
-impl<H> AnyHandler<H> {
+pub(crate) struct AnyHandler<Context, H> {
+    _phantom: PhantomData<Context>,
+    handler: H,
+}
+impl<Context, H> AnyHandler<Context, H> {
     pub(crate) fn new(handler: H) -> Self {
-        Self(handler)
+        Self {
+            _phantom: PhantomData,
+            handler,
+        }
     }
 }
-impl<H: std::fmt::Debug> std::fmt::Debug for AnyHandler<H> {
+impl<Context, H: std::fmt::Debug> std::fmt::Debug for AnyHandler<Context, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("AnyHandler").field(&self.0).finish()
+        f.debug_struct("AnyHandler")
+            .field("handler", &self.handler)
+            .finish()
     }
 }
 
 #[async_trait::async_trait]
-impl<H: Handler> HandleAny for AnyHandler<H>
+impl<Context, H> HandleAny for AnyHandler<Context, H>
 where
+    Context: IntoContext,
+    H: Handler<Context> + CliBindings<Context>,
     H::Params: DeserializeOwned,
-    H::Ok: Serialize,
+    H::Ok: Serialize + DeserializeOwned,
     RpcError: From<H::Err>,
 {
     type Inherited = H::InheritedParams;
     fn handle_sync(&self, handle_args: HandleAnyArgs<Self::Inherited>) -> Result<Value, RpcError> {
         imbl_value::to_value(
             &self
-                .0
+                .handler
                 .handle_sync(handle_args.downcast::<_, H>().map_err(invalid_params)?)?,
         )
         .map_err(internal_error)
@@ -358,7 +305,7 @@ where
     ) -> Result<Value, RpcError> {
         imbl_value::to_value(
             &self
-                .0
+                .handler
                 .handle_async(handle_args.downcast::<_, H>().map_err(invalid_params)?)
                 .await?,
         )
@@ -369,37 +316,45 @@ where
         method: VecDeque<&'static str>,
         ctx_ty: TypeId,
     ) -> OrdMap<&'static str, Value> {
-        self.0.metadata(method, ctx_ty)
+        self.handler.metadata(method, ctx_ty)
     }
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-        self.0.method_from_dots(method, ctx_ty)
+        self.handler.method_from_dots(method, ctx_ty)
+    }
+    fn cli(&self) -> Option<&dyn CliBindingsAny<Inherited = Self::Inherited>> {
+        if H::NO_CLI {
+            None
+        } else {
+            Some(self)
+        }
     }
 }
 
-impl<H: CliBindings> CliBindingsAny for AnyHandler<H>
+impl<Context, H> CliBindingsAny for AnyHandler<Context, H>
 where
-    H: CliBindings,
+    Context: IntoContext,
+    H: CliBindings<Context>,
     H::Params: DeserializeOwned,
     H::Ok: Serialize + DeserializeOwned,
     RpcError: From<H::Err>,
 {
     type Inherited = H::InheritedParams;
     fn cli_command(&self, ctx_ty: TypeId) -> Command {
-        self.0.cli_command(ctx_ty)
+        self.handler.cli_command(ctx_ty)
     }
     fn cli_parse(
         &self,
         matches: &ArgMatches,
         ctx_ty: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.0.cli_parse(matches, ctx_ty)
+        self.handler.cli_parse(matches, ctx_ty)
     }
     fn cli_display(
         &self,
         handle_args: HandleAnyArgs<Self::Inherited>,
         result: Value,
     ) -> Result<(), RpcError> {
-        self.0
+        self.handler
             .cli_display(
                 handle_args.downcast::<_, H>().map_err(invalid_params)?,
                 imbl_value::from_value(result).map_err(internal_error)?,

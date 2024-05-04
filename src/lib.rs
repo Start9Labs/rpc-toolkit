@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "nightly", feature(const_trait_impl, const_type_id))]
+
 pub use cli::*;
 // pub use command::*;
 pub use context::*;

@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use futures::future::{join_all, BoxFuture};
 use futures::{Future, FutureExt, Stream, StreamExt};
-use imbl_value::{InOMap, Value};
+use imbl_value::Value;
 use yajrc::{RpcError, RpcMethod};
 
 use crate::util::{invalid_request, JobRunner};
-use crate::{AnyHandler, Empty, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
+use crate::{AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
 
 pub type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
 pub type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
@@ -23,7 +23,7 @@ pub use socket::*;
 
 pub struct Server<Context: crate::Context> {
     make_ctx: Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
-    root_handler: Arc<AnyHandler<ParentHandler>>,
+    root_handler: Arc<AnyHandler<Context, ParentHandler<Context>>>,
 }
 impl<Context: crate::Context> Clone for Server<Context> {
     fn clone(&self) -> Self {
@@ -39,7 +39,7 @@ impl<Context: crate::Context> Server<Context> {
         Fut: Future<Output = Result<Context, RpcError>> + Send + 'static,
     >(
         make_ctx: MakeCtx,
-        root_handler: ParentHandler,
+        root_handler: ParentHandler<Context>,
     ) -> Self {
         Server {
             make_ctx: Arc::new(move || make_ctx().boxed()),

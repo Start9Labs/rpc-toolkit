@@ -4,7 +4,7 @@ use std::ffi::OsString;
 
 use clap::{CommandFactory, FromArgMatches};
 use futures::Future;
-use imbl_value::{InOMap, Value};
+use imbl_value::Value;
 use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Client, Method};
 use serde::de::DeserializeOwned;
@@ -15,7 +15,7 @@ use yajrc::{Id, RpcError};
 
 use crate::util::{internal_error, invalid_params, parse_error, without, Flat, PhantomData};
 use crate::{
-    AnyHandler, CliBindingsAny, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
+    AnyHandler, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
     HandlerArgsFor, HandlerTypes, IntoContext, Name, ParentHandler, PrintCliResult,
 };
 
@@ -45,17 +45,17 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
         let ctx_ty = TypeId::of::<Context>();
         let mut cmd = Config::command();
         for (name, handlers) in &self.root_handler.subcommands.0 {
-            if let (Name(Some(name)), Some(DynHandler::WithCli(handler))) = (
+            if let (Name(Some(name)), Some(cli)) = (
                 name,
                 if let Some(handler) = handlers.get(&Some(ctx_ty)) {
-                    Some(handler)
+                    handler.cli()
                 } else if let Some(handler) = handlers.get(&None) {
-                    Some(handler)
+                    handler.cli()
                 } else {
                     None
                 },
             ) {
-                cmd = cmd.subcommand(handler.cli_command(ctx_ty).name(name));
+                cmd = cmd.subcommand(cli.cli_command(ctx_ty).name(name));
             }
         }
         let matches = cmd.get_matches_from(args);
@@ -172,11 +172,13 @@ pub async fn call_remote_socket(
         .result
 }
 
-pub struct CallRemoteHandler<Context, RemoteHandler, Extra = Empty> {
-    _phantom: PhantomData<(Context, Extra)>,
+pub struct CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra = Empty> {
+    _phantom: PhantomData<(Context, RemoteContext, Extra)>,
     handler: RemoteHandler,
 }
-impl<Context, RemoteHandler, Extra> CallRemoteHandler<Context, RemoteHandler, Extra> {
+impl<Context, RemoteContext, RemoteHandler, Extra>
+    CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
+{
     pub fn new(handler: RemoteHandler) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -184,8 +186,8 @@ impl<Context, RemoteHandler, Extra> CallRemoteHandler<Context, RemoteHandler, Ex
         }
     }
 }
-impl<Context, RemoteHandler: Clone, Extra> Clone
-    for CallRemoteHandler<Context, RemoteHandler, Extra>
+impl<Context, RemoteContext, RemoteHandler: Clone, Extra> Clone
+    for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
 {
     fn clone(&self) -> Self {
         Self {
@@ -202,8 +204,8 @@ impl<Context, RemoteHandler, Extra> std::fmt::Debug
     }
 }
 
-impl<Context, RemoteHandler, Extra> HandlerTypes
-    for CallRemoteHandler<Context, RemoteHandler, Extra>
+impl<Context, RemoteContext, RemoteHandler, Extra> HandlerTypes
+    for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
 where
     RemoteHandler: HandlerTypes,
     RemoteHandler::Params: Serialize,
@@ -218,17 +220,18 @@ where
     type Err = RemoteHandler::Err;
 }
 
-impl<Context, RemoteHandler, Extra> Handler for CallRemoteHandler<Context, RemoteHandler, Extra>
+impl<Context, RemoteContext, RemoteHandler, Extra> Handler<Context>
+    for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
 where
-    Context: CallRemote<RemoteHandler::Context, Extra>,
-    RemoteHandler: Handler,
+    Context: CallRemote<RemoteContext, Extra>,
+    RemoteContext: IntoContext,
+    RemoteHandler: Handler<RemoteContext>,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
     RemoteHandler::Err: From<RpcError>,
     Extra: Serialize + Send + Sync + 'static,
 {
-    type Context = Context;
     async fn handle_async(
         &self,
         handle_args: HandlerArgsFor<Context, Self>,
@@ -255,18 +258,17 @@ where
         }
     }
 }
-impl<Context, RemoteHandler, Extra> PrintCliResult
-    for CallRemoteHandler<Context, RemoteHandler, Extra>
+impl<Context, RemoteContext, RemoteHandler, Extra> PrintCliResult<Context>
+    for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
 where
-    Context: CallRemote<RemoteHandler::Context>,
-    RemoteHandler: PrintCliResult<Context = Context>,
+    Context: CallRemote<RemoteContext>,
+    RemoteHandler: PrintCliResult<Context>,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
     RemoteHandler::Err: From<RpcError>,
     Extra: Send + Sync + 'static,
 {
-    type Context = Context;
     fn print(
         &self,
         HandlerArgs {
@@ -276,7 +278,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.handler.print(

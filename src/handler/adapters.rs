@@ -1,7 +1,6 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use clap::{CommandFactory, FromArgMatches};
 use imbl_value::imbl::{OrdMap, OrdSet};
@@ -10,25 +9,25 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
 
-use crate::util::{internal_error, invalid_params, without, Flat, PhantomData};
+use crate::util::{internal_error, Flat, PhantomData};
 use crate::{
-    iter_from_ctx_and_handler, AnyContext, AnyHandler, CallRemote, CliBindings, DynHandler,
-    EitherContext, Empty, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext,
-    IntoHandlers, OrEmpty, PrintCliResult,
+    AnyContext, CallRemote, CliBindings, EitherContext, Empty, Handler, HandlerArgs,
+    HandlerArgsFor, HandlerTypes, IntoContext, PrintCliResult,
 };
 
-pub trait HandlerExt: Handler + Sized {
+pub trait HandlerExt<Context: IntoContext>: Handler<Context> + Sized {
     fn no_cli(self) -> NoCli<Self>;
     fn no_display(self) -> NoDisplay<Self>;
-    fn with_custom_display<P>(self, display: P) -> CustomDisplay<P, Self>
+    fn with_custom_display<C: IntoContext, P>(self, display: P) -> CustomDisplay<P, Self>
     where
         P: PrintCliResult<
+            C,
             Params = Self::Params,
             InheritedParams = Self::InheritedParams,
             Ok = Self::Ok,
             Err = Self::Err,
         >;
-    fn with_custom_display_fn<Context: IntoContext, F>(
+    fn with_custom_display_fn<C: IntoContext, F>(
         self,
         display: F,
     ) -> CustomDisplayFn<F, Self, Context>
@@ -40,19 +39,20 @@ pub trait HandlerExt: Handler + Sized {
     ) -> InheritanceHandler<Params, InheritedParams, Self, F>
     where
         F: Fn(Params, InheritedParams) -> Self::InheritedParams;
-    fn with_call_remote<Context>(self) -> RemoteCaller<Context, Self>;
+    fn with_call_remote<C>(self) -> RemoteCaller<C, Self>;
 }
 
-impl<T: Handler + Sized> HandlerExt for T {
+impl<Context: IntoContext, T: Handler<Context> + Sized> HandlerExt<Context> for T {
     fn no_cli(self) -> NoCli<Self> {
         NoCli(self)
     }
     fn no_display(self) -> NoDisplay<Self> {
         NoDisplay(self)
     }
-    fn with_custom_display<P>(self, display: P) -> CustomDisplay<P, Self>
+    fn with_custom_display<C: IntoContext, P>(self, display: P) -> CustomDisplay<P, Self>
     where
         P: PrintCliResult<
+            C,
             Params = Self::Params,
             InheritedParams = Self::InheritedParams,
             Ok = Self::Ok,
@@ -64,7 +64,7 @@ impl<T: Handler + Sized> HandlerExt for T {
             handler: self,
         }
     }
-    fn with_custom_display_fn<Context: IntoContext, F>(
+    fn with_custom_display_fn<C: IntoContext, F>(
         self,
         display: F,
     ) -> CustomDisplayFn<F, Self, Context>
@@ -90,7 +90,7 @@ impl<T: Handler + Sized> HandlerExt for T {
             inherit: f,
         }
     }
-    fn with_call_remote<Context>(self) -> RemoteCaller<Context, Self> {
+    fn with_call_remote<C>(self) -> RemoteCaller<C, Self> {
         RemoteCaller {
             _phantom: PhantomData::new(),
             handler: self,
@@ -106,25 +106,7 @@ impl<H: HandlerTypes> HandlerTypes for NoCli<H> {
     type Ok = H::Ok;
     type Err = H::Err;
 }
-impl<H, A, B> IntoHandlers<Flat<A, B>> for NoCli<H>
-where
-    H: Handler,
-    H::Params: DeserializeOwned,
-    H::InheritedParams: OrEmpty<Flat<A, B>>,
-    H::Ok: Serialize + DeserializeOwned,
-    RpcError: From<H::Err>,
-    A: Send + Sync + 'static,
-    B: Send + Sync + 'static,
-{
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler<Flat<A, B>>)> {
-        iter_from_ctx_and_handler(
-            self.0.contexts(),
-            DynHandler::WithoutCli(Arc::new(AnyHandler::new(
-                self.0.with_inherited(|a, b| OrEmpty::from_t(Flat(a, b))),
-            ))),
-        )
-    }
-}
+// TODO: implement Handler
 
 #[derive(Debug, Clone)]
 pub struct NoDisplay<H>(pub H);
@@ -135,11 +117,11 @@ impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
     type Err = H::Err;
 }
 
-impl<H> Handler for NoDisplay<H>
+impl<Context, H> Handler<Context> for NoDisplay<H>
 where
-    H: Handler,
+    Context: IntoContext,
+    H: Handler<Context>,
 {
-    type Context = H::Context;
     fn handle_sync(
         &self,
         HandlerArgs {
@@ -149,7 +131,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.0.handle_sync(HandlerArgs {
             context,
@@ -169,7 +151,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.0
             .handle_async(HandlerArgs {
@@ -196,13 +178,13 @@ where
         self.0.method_from_dots(method, ctx_ty)
     }
 }
-impl<H> PrintCliResult for NoDisplay<H>
+impl<Context, H> PrintCliResult<Context> for NoDisplay<H>
 where
+    Context: IntoContext,
     H: HandlerTypes,
     H::Params: FromArgMatches + CommandFactory + Serialize,
 {
-    type Context = AnyContext;
-    fn print(&self, _: HandlerArgsFor<Self::Context, Self>, _: Self::Ok) -> Result<(), Self::Err> {
+    fn print(&self, _: HandlerArgsFor<Context, Self>, _: Self::Ok) -> Result<(), Self::Err> {
         Ok(())
     }
 }
@@ -222,12 +204,12 @@ where
     type Err = H::Err;
 }
 
-impl<P, H> Handler for CustomDisplay<P, H>
+impl<Context, P, H> Handler<Context> for CustomDisplay<P, H>
 where
-    H: Handler,
+    Context: IntoContext,
+    H: Handler<Context>,
     P: Send + Sync + Clone + 'static,
 {
-    type Context = H::Context;
     fn handle_sync(
         &self,
         HandlerArgs {
@@ -237,7 +219,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler.handle_sync(HandlerArgs {
             context,
@@ -257,7 +239,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler
             .handle_async(HandlerArgs {
@@ -284,10 +266,12 @@ where
         self.handler.method_from_dots(method, ctx_ty)
     }
 }
-impl<P, H> PrintCliResult for CustomDisplay<P, H>
+impl<Context, P, H> PrintCliResult<Context> for CustomDisplay<P, H>
 where
+    Context: IntoContext,
     H: HandlerTypes,
     P: PrintCliResult<
+            Context,
             Params = H::Params,
             InheritedParams = H::InheritedParams,
             Ok = H::Ok,
@@ -297,7 +281,6 @@ where
         + Clone
         + 'static,
 {
-    type Context = P::Context;
     fn print(
         &self,
         HandlerArgs {
@@ -307,7 +290,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.print.print(
@@ -356,13 +339,13 @@ where
     type Err = H::Err;
 }
 
-impl<F, H, Context> Handler for CustomDisplayFn<F, H, Context>
+impl<Context, F, H, C> Handler<Context> for CustomDisplayFn<F, H, C>
 where
-    Context: Send + Sync + 'static,
-    H: Handler,
+    Context: IntoContext,
+    C: 'static,
+    H: Handler<Context>,
     F: Send + Sync + Clone + 'static,
 {
-    type Context = H::Context;
     fn handle_sync(
         &self,
         HandlerArgs {
@@ -372,7 +355,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler.handle_sync(HandlerArgs {
             context,
@@ -392,7 +375,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler
             .handle_async(HandlerArgs {
@@ -419,13 +402,12 @@ where
         self.handler.method_from_dots(method, ctx_ty)
     }
 }
-impl<F, H, Context> PrintCliResult for CustomDisplayFn<F, H, Context>
+impl<F, H, Context> PrintCliResult<Context> for CustomDisplayFn<F, H, Context>
 where
     Context: IntoContext,
     H: HandlerTypes,
     F: Fn(HandlerArgsFor<Context, H>, H::Ok) -> Result<(), H::Err> + Send + Sync + Clone + 'static,
 {
-    type Context = Context;
     fn print(
         &self,
         HandlerArgs {
@@ -479,16 +461,17 @@ where
     type Err = H::Err;
 }
 
-impl<Context, H> Handler for RemoteCaller<Context, H>
+impl<Context, RemoteContext, H> Handler<EitherContext<Context, RemoteContext>>
+    for RemoteCaller<Context, H>
 where
-    Context: CallRemote<H::Context>,
-    H: Handler,
+    Context: CallRemote<RemoteContext>,
+    RemoteContext: IntoContext,
+    H: Handler<RemoteContext>,
     H::Params: Serialize,
     H::InheritedParams: Serialize,
     H::Ok: DeserializeOwned,
     H::Err: From<RpcError>,
 {
-    type Context = EitherContext<Context, H::Context>;
     async fn handle_async(
         &self,
         HandlerArgs {
@@ -498,7 +481,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<EitherContext<Context, RemoteContext>, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         match context {
             EitherContext::C1(context) => {
@@ -535,18 +518,17 @@ where
         self.handler.metadata(method, ctx_ty)
     }
     fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        Self::Context::type_ids()
+        Context::type_ids()
     }
     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
         self.handler.method_from_dots(method, ctx_ty)
     }
 }
-impl<Context, H> PrintCliResult for RemoteCaller<Context, H>
+impl<Context, H> PrintCliResult<Context> for RemoteCaller<Context, H>
 where
     Context: IntoContext,
-    H: PrintCliResult,
+    H: PrintCliResult<Context>,
 {
-    type Context = H::Context;
     fn print(
         &self,
         HandlerArgs {
@@ -556,7 +538,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.handler.print(
@@ -611,14 +593,15 @@ where
     type Err = H::Err;
 }
 
-impl<Params, InheritedParams, H, F> Handler for InheritanceHandler<Params, InheritedParams, H, F>
+impl<Context, Params, InheritedParams, H, F> Handler<Context>
+    for InheritanceHandler<Params, InheritedParams, H, F>
 where
+    Context: IntoContext,
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
-    H: Handler,
+    H: Handler<Context>,
     F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
 {
-    type Context = H::Context;
     fn handle_sync(
         &self,
         HandlerArgs {
@@ -628,7 +611,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler.handle_sync(HandlerArgs {
             context,
@@ -648,7 +631,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         self.handler
             .handle_async(HandlerArgs {
@@ -676,15 +659,15 @@ where
     }
 }
 
-impl<Params, InheritedParams, H, F> CliBindings
+impl<Context, Params, InheritedParams, H, F> CliBindings<Context>
     for InheritanceHandler<Params, InheritedParams, H, F>
 where
+    Context: IntoContext,
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
-    H: CliBindings,
+    H: CliBindings<Context>,
     F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
 {
-    type Context = H::Context;
     fn cli_command(&self, ctx_ty: TypeId) -> clap::Command {
         self.handler.cli_command(ctx_ty)
     }
@@ -704,7 +687,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<Self::Context, Self>,
+        }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.handler.cli_display(

@@ -2,14 +2,16 @@ use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Display;
 
+use clap::{CommandFactory, FromArgMatches};
 use futures::Future;
 use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use crate::util::PhantomData;
 use crate::{
-    AnyContext, Empty, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext,
+    CliBindings, Empty, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext,
     PrintCliResult,
 };
 
@@ -42,18 +44,62 @@ impl<F, T, E, Args> std::fmt::Debug for FromFn<F, T, E, Args> {
             .finish()
     }
 }
-impl<F, T, E, Args> PrintCliResult for FromFn<F, T, E, Args>
+impl<Context, F, T, E, Args> PrintCliResult<Context> for FromFn<F, T, E, Args>
 where
+    Context: IntoContext,
     Self: HandlerTypes,
     <Self as HandlerTypes>::Ok: Display,
 {
-    type Context = AnyContext;
-    fn print(
+    fn print(&self, _: HandlerArgsFor<Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
+        Ok(println!("{result}"))
+    }
+}
+impl<Context, F, T, E, Args> CliBindings<Context> for FromFn<F, T, E, Args>
+where
+    Context: IntoContext,
+    Self: HandlerTypes,
+    Self::Params: CommandFactory + FromArgMatches + Serialize,
+    Self: PrintCliResult<Context>,
+{
+    fn cli_command(&self, _: TypeId) -> clap::Command {
+        Self::Params::command()
+    }
+    fn cli_parse(
         &self,
-        _: HandlerArgsFor<Self::Context, Self>,
+        matches: &clap::ArgMatches,
+        _: TypeId,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
-        Ok(println!("{result}"))
+        self.print(
+            HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            },
+            result,
+        )
     }
 }
 
@@ -106,18 +152,62 @@ impl<F, Fut, T, E, Args> std::fmt::Debug for FromFnAsync<F, Fut, T, E, Args> {
         f.debug_struct("FromFnAsync").finish()
     }
 }
-impl<F, Fut, T, E, Args> PrintCliResult for FromFnAsync<F, Fut, T, E, Args>
+impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsync<F, Fut, T, E, Args>
 where
+    Context: IntoContext,
     Self: HandlerTypes,
     <Self as HandlerTypes>::Ok: Display,
 {
-    type Context = AnyContext;
-    fn print(
+    fn print(&self, _: HandlerArgsFor<Context, Self>, result: Self::Ok) -> Result<(), Self::Err> {
+        Ok(println!("{result}"))
+    }
+}
+impl<Context, F, Fut, T, E, Args> CliBindings<Context> for FromFnAsync<F, Fut, T, E, Args>
+where
+    Context: IntoContext,
+    Self: HandlerTypes,
+    Self::Params: CommandFactory + FromArgMatches + Serialize,
+    Self: PrintCliResult<Context>,
+{
+    fn cli_command(&self, _: TypeId) -> clap::Command {
+        Self::Params::command()
+    }
+    fn cli_parse(
         &self,
-        _: HandlerArgsFor<Self::Context, Self>,
+        matches: &clap::ArgMatches,
+        _: TypeId,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
-        Ok(println!("{result}"))
+        self.print(
+            HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            },
+            result,
+        )
     }
 }
 
@@ -152,7 +242,7 @@ where
     type Err = E;
 }
 
-impl<F, T, E, Context, Params, InheritedParams> Handler
+impl<F, T, E, Context, Params, InheritedParams> Handler<Context>
     for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
     F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Result<T, E>
@@ -166,16 +256,15 @@ where
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
 {
-    type Context = Context;
     fn handle_sync(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args)
     }
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -204,7 +293,7 @@ where
     type Err = E;
 }
 
-impl<F, Fut, T, E, Context, Params, InheritedParams> Handler
+impl<F, Fut, T, E, Context, Params, InheritedParams> Handler<Context>
     for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
     F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
@@ -215,10 +304,9 @@ where
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
 {
-    type Context = Context;
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args).await
     }
@@ -239,19 +327,19 @@ where
     type Err = E;
 }
 
-impl<F, T, E> Handler for FromFn<F, T, E, ()>
+impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, ()>
 where
+    Context: IntoContext,
     F: Fn() -> Result<T, E> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Context = AnyContext;
-    fn handle_sync(&self, _: HandlerArgsFor<Self::Context, Self>) -> Result<Self::Ok, Self::Err> {
+    fn handle_sync(&self, _: HandlerArgsFor<Context, Self>) -> Result<Self::Ok, Self::Err> {
         (self.function)()
     }
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -276,18 +364,15 @@ where
     type Err = E;
 }
 
-impl<F, Fut, T, E> Handler for FromFnAsync<F, Fut, T, E, ()>
+impl<Context, F, Fut, T, E> Handler<Context> for FromFnAsync<F, Fut, T, E, ()>
 where
+    Context: IntoContext,
     F: Fn() -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Context = AnyContext;
-    async fn handle_async(
-        &self,
-        _: HandlerArgsFor<Self::Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
+    async fn handle_async(&self, _: HandlerArgsFor<Context, Self>) -> Result<Self::Ok, Self::Err> {
         (self.function)().await
     }
     fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
@@ -308,23 +393,22 @@ where
     type Err = E;
 }
 
-impl<Context, F, T, E> Handler for FromFn<F, T, E, (Context,)>
+impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, (Context,)>
 where
     Context: IntoContext,
     F: Fn(Context) -> Result<T, E> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Context = Context;
     fn handle_sync(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args.context)
     }
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -350,7 +434,7 @@ where
     type Err = E;
 }
 
-impl<Context, F, Fut, T, E> Handler for FromFnAsync<F, Fut, T, E, (Context,)>
+impl<Context, F, Fut, T, E> Handler<Context> for FromFnAsync<F, Fut, T, E, (Context,)>
 where
     Context: IntoContext,
     F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
@@ -358,10 +442,9 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Context = Context;
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args.context).await
     }
@@ -384,7 +467,7 @@ where
     type Err = E;
 }
 
-impl<Context, F, T, E, Params> Handler for FromFn<F, T, E, (Context, Params)>
+impl<Context, F, T, E, Params> Handler<Context> for FromFn<F, T, E, (Context, Params)>
 where
     Context: IntoContext,
     F: Fn(Context, Params) -> Result<T, E> + Send + Sync + Clone + 'static,
@@ -392,10 +475,9 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Context = Context;
     fn handle_sync(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let HandlerArgs {
             context, params, ..
@@ -404,7 +486,7 @@ where
     }
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -431,7 +513,8 @@ where
     type Err = E;
 }
 
-impl<Context, F, Fut, T, E, Params> Handler for FromFnAsync<F, Fut, T, E, (Context, Params)>
+impl<Context, F, Fut, T, E, Params> Handler<Context>
+    for FromFnAsync<F, Fut, T, E, (Context, Params)>
 where
     Context: IntoContext,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
@@ -440,10 +523,9 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Context = Context;
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let HandlerArgs {
             context, params, ..
@@ -471,7 +553,7 @@ where
     type Err = E;
 }
 
-impl<Context, F, T, E, Params, InheritedParams> Handler
+impl<Context, F, T, E, Params, InheritedParams> Handler<Context>
     for FromFn<F, T, E, (Context, Params, InheritedParams)>
 where
     Context: IntoContext,
@@ -481,10 +563,9 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Context = Context;
     fn handle_sync(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let HandlerArgs {
             context,
@@ -496,7 +577,7 @@ where
     }
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         if self.blocking {
             self.handle_async_with_sync_blocking(handle_args).await
@@ -525,7 +606,7 @@ where
     type Err = E;
 }
 
-impl<Context, F, Fut, T, E, Params, InheritedParams> Handler
+impl<Context, F, Fut, T, E, Params, InheritedParams> Handler<Context>
     for FromFnAsync<F, Fut, T, E, (Context, Params, InheritedParams)>
 where
     Context: IntoContext,
@@ -536,10 +617,9 @@ where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
 {
-    type Context = Context;
     async fn handle_async(
         &self,
-        handle_args: HandlerArgsFor<Self::Context, Self>,
+        handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let HandlerArgs {
             context,

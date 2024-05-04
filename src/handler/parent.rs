@@ -1,43 +1,17 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use imbl_value::imbl::{OrdMap, OrdSet};
 use imbl_value::Value;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
 
 use crate::util::{combine, Flat, PhantomData};
 use crate::{
-    AnyContext, AnyHandler, CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler,
-    HandlerArgs, HandlerArgsFor, HandlerExt, HandlerTypes, IntoContext, OrEmpty,
+    AnyContext, CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
+    HandlerArgsFor, HandlerTypes, IntoContext,
 };
-
-pub trait IntoHandlers<Inherited>: HandlerTypes {
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler<Inherited>)>;
-}
-
-impl<H, A, B> IntoHandlers<Flat<A, B>> for H
-where
-    H: Handler + CliBindings,
-    H::Params: DeserializeOwned,
-    H::InheritedParams: OrEmpty<Flat<A, B>>,
-    H::Ok: Serialize + DeserializeOwned,
-    RpcError: From<H::Err>,
-    A: Send + Sync + 'static,
-    B: Send + Sync + 'static,
-{
-    fn into_handlers(self) -> impl IntoIterator<Item = (Option<TypeId>, DynHandler<Flat<A, B>>)> {
-        iter_from_ctx_and_handler(
-            intersect_type_ids(self.contexts(), <Self as CliBindings>::Context::type_ids()),
-            DynHandler::WithCli(Arc::new(AnyHandler::new(
-                self.with_inherited(|a, b| OrEmpty::from_t(Flat(a, b))),
-            ))),
-        )
-    }
-}
 
 pub(crate) fn iter_from_ctx_and_handler<Inherited>(
     ctx: Option<OrdSet<TypeId>>,
@@ -109,12 +83,12 @@ impl<Inherited> SubcommandMap<Inherited> {
     }
 }
 
-pub struct ParentHandler<Params = Empty, InheritedParams = Empty> {
-    _phantom: PhantomData<Params>,
+pub struct ParentHandler<Context = AnyContext, Params = Empty, InheritedParams = Empty> {
+    _phantom: PhantomData<Context>,
     pub(crate) subcommands: SubcommandMap<Flat<Params, InheritedParams>>,
     metadata: OrdMap<&'static str, Value>,
 }
-impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
+impl<Context, Params, InheritedParams> ParentHandler<Context, Params, InheritedParams> {
     pub fn new() -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -127,7 +101,7 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
         self
     }
 }
-impl<Params, InheritedParams> Clone for ParentHandler<Params, InheritedParams> {
+impl<Context, Params, InheritedParams> Clone for ParentHandler<Context, Params, InheritedParams> {
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -136,7 +110,9 @@ impl<Params, InheritedParams> Clone for ParentHandler<Params, InheritedParams> {
         }
     }
 }
-impl<Params, InheritedParams> std::fmt::Debug for ParentHandler<Params, InheritedParams> {
+impl<Context, Params, InheritedParams> std::fmt::Debug
+    for ParentHandler<Context, Params, InheritedParams>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ParentHandler")
             // .field(&self.subcommands)
@@ -144,7 +120,9 @@ impl<Params, InheritedParams> std::fmt::Debug for ParentHandler<Params, Inherite
     }
 }
 
-impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
+impl<Context: IntoContext, Params, InheritedParams>
+    ParentHandler<Context, Params, InheritedParams>
+{
     fn get_contexts(&self) -> Option<OrdSet<TypeId>> {
         let mut set = OrdSet::new();
         for ctx_ty in self.subcommands.0.values().flat_map(|c| c.keys()) {
@@ -153,25 +131,30 @@ impl<Params, InheritedParams> ParentHandler<Params, InheritedParams> {
         Some(set)
     }
     #[allow(private_bounds)]
-    pub fn subcommand<H>(mut self, name: &'static str, handler: H) -> Self
+    pub fn subcommand<C: IntoContext, H>(mut self, name: &'static str, handler: H) -> Self
     where
-        H: IntoHandlers<Flat<Params, InheritedParams>>,
+        H: Handler<C, InheritedParams = Flat<Params, InheritedParams>> + CliBindings<C>,
     {
-        self.subcommands
-            .insert(name.into(), handler.into_handlers());
+        if let Some(h) = DynHandler::iter(handler) {
+            self.subcommands.insert(name.into(), h);
+        }
         self
     }
     #[allow(private_bounds)]
-    pub fn root_handler<H>(mut self, handler: H) -> Self
+    pub fn root_handler<C: IntoContext, H>(mut self, handler: H) -> Self
     where
-        H: IntoHandlers<Flat<Params, InheritedParams>> + HandlerTypes<Params = Empty>,
+        H: Handler<C, Params = Empty, InheritedParams = Flat<Params, InheritedParams>>
+            + CliBindings<C>,
     {
-        self.subcommands.insert(None, handler.into_handlers());
+        if let Some((c, h)) = DynHandler::iter(handler) {
+            self.subcommands.insert(None, h);
+        }
         self
     }
 }
 
-impl<Params, InheritedParams> HandlerTypes for ParentHandler<Params, InheritedParams>
+impl<Context, Params, InheritedParams> HandlerTypes
+    for ParentHandler<Context, Params, InheritedParams>
 where
     Params: Send + Sync,
     InheritedParams: Send + Sync,
@@ -182,12 +165,13 @@ where
     type Err = RpcError;
 }
 
-impl<Params, InheritedParams> Handler for ParentHandler<Params, InheritedParams>
+impl<Context, Params, InheritedParams> Handler<Context>
+    for ParentHandler<Context, Params, InheritedParams>
 where
+    Context: IntoContext,
     Params: Send + Sync + 'static,
     InheritedParams: Serialize + Send + Sync + 'static,
 {
-    type Context = AnyContext;
     fn handle_sync(
         &self,
         HandlerArgs {
@@ -197,7 +181,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<AnyContext, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
         if let Some(cmd) = cmd {
@@ -205,7 +189,7 @@ where
         }
         if let Some((_, sub_handler)) = &self.subcommands.get(context.inner_type_id(), cmd) {
             sub_handler.handle_sync(HandleAnyArgs {
-                context,
+                context: context.upcast(),
                 parent_method,
                 method,
                 params: raw_params,
@@ -224,7 +208,7 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<AnyContext, Self>,
+        }: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
         let cmd = method.pop_front();
         if let Some(cmd) = cmd {
@@ -233,7 +217,7 @@ where
         if let Some((_, sub_handler)) = self.subcommands.get(context.inner_type_id(), cmd) {
             sub_handler
                 .handle_async(HandleAnyArgs {
-                    context,
+                    context: context.upcast(),
                     parent_method,
                     method,
                     params: raw_params,
@@ -280,29 +264,30 @@ where
     }
 }
 
-impl<Params, InheritedParams> CliBindings for ParentHandler<Params, InheritedParams>
+impl<Context, Params, InheritedParams> CliBindings<Context>
+    for ParentHandler<Context, Params, InheritedParams>
 where
+    Context: IntoContext,
     Params: FromArgMatches + CommandFactory + Serialize + Send + Sync + 'static,
     InheritedParams: Serialize + Send + Sync + 'static,
 {
-    type Context = AnyContext;
     fn cli_command(&self, ctx_ty: TypeId) -> Command {
         let mut base = Params::command().subcommand_required(true);
         for (name, handlers) in &self.subcommands.0 {
             match (
                 name,
                 if let Some(handler) = handlers.get(&Some(ctx_ty)) {
-                    Some(handler)
+                    handler.cli()
                 } else if let Some(handler) = handlers.get(&None) {
-                    Some(handler)
+                    handler.cli()
                 } else {
                     None
                 },
             ) {
-                (Name(Some(name)), Some(DynHandler::WithCli(handler))) => {
-                    base = base.subcommand(handler.cli_command(ctx_ty).name(name));
+                (Name(Some(name)), Some(cli)) => {
+                    base = base.subcommand(cli.cli_command(ctx_ty).name(name));
                 }
-                (Name(None), Some(DynHandler::WithCli(_))) => {
+                (Name(None), Some(_)) => {
                     base = base.subcommand_required(false);
                 }
                 _ => (),
@@ -321,10 +306,12 @@ where
             Some((name, matches)) => (Some(name), matches),
             None => (None, matches),
         };
-        if let Some((Name(Some(name)), DynHandler::WithCli(handler))) =
-            self.subcommands.get(ctx_ty, name)
+        if let Some((Name(Some(name)), cli)) = self
+            .subcommands
+            .get(ctx_ty, name)
+            .and_then(|(n, h)| h.cli().map(|c| (n, c)))
         {
-            let (mut method, params) = handler.cli_parse(matches, ctx_ty)?;
+            let (mut method, params) = cli.cli_parse(matches, ctx_ty)?;
             method.push_front(name);
 
             Ok((
@@ -345,19 +332,21 @@ where
             params,
             inherited_params,
             raw_params,
-        }: HandlerArgsFor<AnyContext, Self>,
+        }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         let cmd = method.pop_front();
         if let Some(cmd) = cmd {
             parent_method.push_back(cmd);
         }
-        if let Some((_, DynHandler::WithCli(sub_handler))) =
-            self.subcommands.get(context.inner_type_id(), cmd)
+        if let Some((_, cli)) = self
+            .subcommands
+            .get(context.inner_type_id(), cmd)
+            .and_then(|(n, h)| h.cli().map(|c| (n, c)))
         {
-            sub_handler.cli_display(
+            cli.cli_display(
                 HandleAnyArgs {
-                    context,
+                    context: context.upcast(),
                     parent_method,
                     method,
                     params: raw_params,

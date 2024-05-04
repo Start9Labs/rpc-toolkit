@@ -84,6 +84,8 @@ impl<C1: IntoContext, C2: IntoContext> IntoContext for EitherContext<C1, C2> {
         }
     }
 }
+impl<C1, C2> From<C1> for EitherContext<C1, C2> {}
+impl<C1, C2> From<C2> for EitherContext<C1, C2> {}
 
 pub struct AnyContext(Box<dyn Context>);
 impl AnyContext {
@@ -114,9 +116,25 @@ impl IntoContext for AnyContext {
     }
 }
 
-mod sealed {
-    pub(crate) trait Sealed {}
-    impl<C: super::Context> Sealed for C {}
-    impl<C1: super::IntoContext, C2: super::IntoContext> Sealed for super::EitherContext<C1, C2> {}
-    impl Sealed for super::AnyContext {}
+pub(crate) mod sealed {
+    use std::any::TypeId;
+
+    pub(crate) trait Sealed {
+        fn contains_type_id(id: TypeId) -> bool;
+    }
+    impl<C: super::Context> Sealed for C {
+        fn contains_type_id(id: TypeId) -> bool {
+            id == TypeId::of::<C>()
+        }
+    }
+    impl<C1: super::IntoContext, C2: super::IntoContext> Sealed for super::EitherContext<C1, C2> {
+        fn contains_type_id(id: TypeId) -> bool {
+            C1::contains_type_id(id) || C2::contains_type_id(id)
+        }
+    }
+    impl Sealed for super::AnyContext {
+        fn contains_type_id(_: TypeId) -> bool {
+            true
+        }
+    }
 }
