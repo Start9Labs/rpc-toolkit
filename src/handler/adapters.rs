@@ -605,9 +605,9 @@ where
 {
     type H = H;
     fn handler_for<C: crate::Context>(self) -> Option<DynHandler<C, Inherited>> {
-        if dbg!(TypeId::of::<C>()) == dbg!(TypeId::of::<RemoteContext>()) {
+        if TypeId::of::<C>() == TypeId::of::<RemoteContext>() {
             DynHandler::new(self.handler.handler.no_cli())
-        } else if dbg!(TypeId::of::<C>()) == dbg!(TypeId::of::<Context>()) {
+        } else if TypeId::of::<C>() == TypeId::of::<Context>() {
             DynHandler::new(CallRemoteHandler::<Context, RemoteContext, _>::new(
                 self.handler.handler,
             ))
