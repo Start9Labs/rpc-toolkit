@@ -253,6 +253,36 @@ where
         Ok(())
     }
 }
+impl<Context, H> CliBindings<Context> for NoDisplay<H>
+where
+    Context: crate::Context,
+    Self: HandlerTypes,
+    Self::Params: CommandFactory + FromArgMatches + Serialize,
+    Self: PrintCliResult<Context>,
+{
+    fn cli_command(&self) -> clap::Command {
+        Self::Params::command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        handle_args: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.print(handle_args, result)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct CustomDisplay<P, H> {
@@ -362,6 +392,36 @@ where
             },
             result,
         )
+    }
+}
+impl<Context, P, H> CliBindings<Context> for CustomDisplay<P, H>
+where
+    Context: crate::Context,
+    Self: HandlerTypes,
+    Self::Params: CommandFactory + FromArgMatches + Serialize,
+    Self: PrintCliResult<Context>,
+{
+    fn cli_command(&self) -> clap::Command {
+        Self::Params::command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        handle_args: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.print(handle_args, result)
     }
 }
 
@@ -484,6 +544,36 @@ where
         )
     }
 }
+impl<Context, F, H, C> CliBindings<Context> for CustomDisplayFn<F, H, C>
+where
+    Context: crate::Context,
+    Self: HandlerTypes,
+    Self::Params: CommandFactory + FromArgMatches + Serialize,
+    Self: PrintCliResult<Context>,
+{
+    fn cli_command(&self) -> clap::Command {
+        Self::Params::command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        Self::Params::from_arg_matches(matches).and_then(|a| {
+            Ok((
+                VecDeque::new(),
+                imbl_value::to_value(&a)
+                    .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?,
+            ))
+        })
+    }
+    fn cli_display(
+        &self,
+        handle_args: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.print(handle_args, result)
+    }
+}
 
 pub struct RemoteCaller<Context, RemoteContext, H> {
     _phantom: PhantomData<(Context, RemoteContext)>,
@@ -503,138 +593,6 @@ impl<Context, RemoteContext, H: Debug> Debug for RemoteCaller<Context, RemoteCon
     }
 }
 
-// impl<Context, RemoteContext, H> HandlerTypes for RemoteCaller<Context, RemoteContext, H>
-// where
-//     H: HandlerTypes,
-// {
-//     type Params = H::Params;
-//     type InheritedParams = H::InheritedParams;
-//     type Ok = H::Ok;
-//     type Err = H::Err;
-// }
-// impl<Context, RemoteContext, H> HandlerFor<RemoteContext>
-//     for RemoteCaller<Context, RemoteContext, H>
-// where
-//     Context: CallRemote<RemoteContext>,
-//     RemoteContext: crate::Context,
-//     H: HandlerFor<RemoteContext>,
-//     H::Params: Serialize,
-//     H::InheritedParams: Serialize,
-//     H::Ok: DeserializeOwned,
-//     H::Err: From<RpcError>,
-// {
-//     async fn handle_async(
-//         &self,
-//         HandlerArgs {
-//             context,
-//             parent_method,
-//             method,
-//             params,
-//             inherited_params,
-//             raw_params,
-//         }: HandlerArgsFor<RemoteContext, Self>,
-//     ) -> Result<Self::Ok, Self::Err> {
-//         self.handler
-//             .handle_async(HandlerArgs {
-//                 context,
-//                 parent_method,
-//                 method,
-//                 params,
-//                 inherited_params,
-//                 raw_params,
-//             })
-//             .await
-//     }
-//     fn metadata(
-//         &self,
-//         method: VecDeque<&'static str>,
-//         ctx_ty: TypeId,
-//     ) -> OrdMap<&'static str, Value> {
-//         self.handler.metadata(method, ctx_ty)
-//     }
-//     fn contexts(&self) -> Option<OrdSet<TypeId>> {
-//         Context::type_ids()
-//     }
-//     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-//         self.handler.method_from_dots(method, ctx_ty)
-//     }
-// }
-// impl<Context, RemoteContext, H> HandlerFor<Context> for RemoteCaller<Context, RemoteContext, H>
-// where
-//     Context: CallRemote<RemoteContext>,
-//     RemoteContext: crate::Context,
-//     H: HandlerFor<RemoteContext>,
-//     H::Params: Serialize,
-//     H::InheritedParams: Serialize,
-//     H::Ok: DeserializeOwned,
-//     H::Err: From<RpcError>,
-// {
-//     async fn handle_async(
-//         &self,
-//         HandlerArgs {
-//             context,
-//             parent_method,
-//             method,
-//             params,
-//             inherited_params,
-//             raw_params,
-//         }: HandlerArgsFor<Context, Self>,
-//     ) -> Result<Self::Ok, Self::Err> {
-//         let full_method = parent_method.into_iter().chain(method).collect::<Vec<_>>();
-//         match context
-//             .call_remote(&full_method.join("."), raw_params, Empty {})
-//             .await
-//         {
-//             Ok(a) => imbl_value::from_value(a)
-//                 .map_err(internal_error)
-//                 .map_err(Self::Err::from),
-//             Err(e) => Err(Self::Err::from(e)),
-//         }
-//     }
-//     fn metadata(
-//         &self,
-//         method: VecDeque<&'static str>,
-//         ctx_ty: TypeId,
-//     ) -> OrdMap<&'static str, Value> {
-//         self.handler.metadata(method, ctx_ty)
-//     }
-//     fn contexts(&self) -> Option<OrdSet<TypeId>> {
-//         Context::type_ids()
-//     }
-//     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-//         self.handler.method_from_dots(method, ctx_ty)
-//     }
-// }
-// impl<Context, RemoteContext, H> PrintCliResult<Context> for RemoteCaller<Context, RemoteContext, H>
-// where
-//     Context: crate::Context,
-//     H: PrintCliResult<Context>,
-// {
-//     fn print(
-//         &self,
-//         HandlerArgs {
-//             context,
-//             parent_method,
-//             method,
-//             params,
-//             inherited_params,
-//             raw_params,
-//         }: HandlerArgsFor<Context, Self>,
-//         result: Self::Ok,
-//     ) -> Result<(), Self::Err> {
-//         self.handler.print(
-//             HandlerArgs {
-//                 context,
-//                 parent_method,
-//                 method,
-//                 params,
-//                 inherited_params,
-//                 raw_params,
-//             },
-//             result,
-//         )
-//     }
-// }
 impl<Context, H, Inherited, LocalContext, RemoteContext> Handler<Inherited>
     for WithContext<Context, RemoteCaller<LocalContext, RemoteContext, H>>
 where
