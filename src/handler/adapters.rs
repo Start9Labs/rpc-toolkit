@@ -30,9 +30,9 @@ pub trait HandlerExt<Context: crate::Context>: HandlerFor<Context> + Sized {
     fn with_custom_display_fn<C: crate::Context, F>(
         self,
         display: F,
-    ) -> CustomDisplayFn<F, Self, Context>
+    ) -> CustomDisplayFn<F, Self, C>
     where
-        F: Fn(HandlerArgsFor<Context, Self>, Self::Ok) -> Result<(), Self::Err>;
+        F: Fn(HandlerArgsFor<C, Self>, Self::Ok) -> Result<(), Self::Err>;
     fn with_inherited<Params, InheritedParams, F>(
         self,
         f: F,
@@ -64,12 +64,9 @@ impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context
             handler: self,
         }
     }
-    fn with_custom_display_fn<C: crate::Context, F>(
-        self,
-        display: F,
-    ) -> CustomDisplayFn<F, Self, Context>
+    fn with_custom_display_fn<C: crate::Context, F>(self, display: F) -> CustomDisplayFn<F, Self, C>
     where
-        F: Fn(HandlerArgsFor<Context, Self>, Self::Ok) -> Result<(), Self::Err>,
+        F: Fn(HandlerArgsFor<C, Self>, Self::Ok) -> Result<(), Self::Err>,
     {
         CustomDisplayFn {
             _phantom: PhantomData::new(),

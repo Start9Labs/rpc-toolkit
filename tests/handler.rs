@@ -129,6 +129,7 @@ fn make_api<C: Context>() -> ParentHandler<C> {
                     ))
                 },
             )
+            .with_custom_display_fn(|_, a| Ok(println!("{a}")))
             .with_call_remote::<CliContext>(),
         )
         .subcommand(
