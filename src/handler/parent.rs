@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fmt::Debug;
 
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 use imbl_value::imbl::OrdMap;
@@ -26,6 +27,11 @@ pub(crate) struct SubcommandMap<Context, Inherited>(
 impl<Context, Inherited> Clone for SubcommandMap<Context, Inherited> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+impl<Context, Inherited> Debug for SubcommandMap<Context, Inherited> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map().entries(self.0.iter()).finish()
     }
 }
 impl<Context, Inherited> SubcommandMap<Context, Inherited> {
@@ -73,7 +79,7 @@ impl<Context, Params, InheritedParams> std::fmt::Debug
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ParentHandler")
-            // .field(&self.subcommands)
+            .field(&self.subcommands)
             .finish()
     }
 }

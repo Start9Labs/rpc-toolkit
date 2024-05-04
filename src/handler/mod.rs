@@ -1,5 +1,6 @@
 use std::any::TypeId;
 use std::collections::VecDeque;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -145,6 +146,11 @@ impl<Context: crate::Context, Inherited> DynHandler<Context, Inherited> {
 impl<Context, Inherited> Clone for DynHandler<Context, Inherited> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+impl<Context, Inherited> Debug for DynHandler<Context, Inherited> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DynHandler").finish()
     }
 }
 #[async_trait::async_trait]
