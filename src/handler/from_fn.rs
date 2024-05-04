@@ -1,4 +1,3 @@
-use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Display;
 
@@ -11,8 +10,7 @@ use serde::Serialize;
 
 use crate::util::PhantomData;
 use crate::{
-    CliBindings, Empty, Handler, HandlerArgs, HandlerArgsFor, HandlerTypes, IntoContext,
-    PrintCliResult,
+    CliBindings, Empty, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes, PrintCliResult,
 };
 
 pub struct FromFn<F, T, E, Args> {
@@ -46,7 +44,7 @@ impl<F, T, E, Args> std::fmt::Debug for FromFn<F, T, E, Args> {
 }
 impl<Context, F, T, E, Args> PrintCliResult<Context> for FromFn<F, T, E, Args>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     Self: HandlerTypes,
     <Self as HandlerTypes>::Ok: Display,
 {
@@ -56,18 +54,17 @@ where
 }
 impl<Context, F, T, E, Args> CliBindings<Context> for FromFn<F, T, E, Args>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     Self: HandlerTypes,
     Self::Params: CommandFactory + FromArgMatches + Serialize,
     Self: PrintCliResult<Context>,
 {
-    fn cli_command(&self, _: TypeId) -> clap::Command {
+    fn cli_command(&self) -> clap::Command {
         Self::Params::command()
     }
     fn cli_parse(
         &self,
         matches: &clap::ArgMatches,
-        _: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
         Self::Params::from_arg_matches(matches).and_then(|a| {
             Ok((
@@ -154,7 +151,7 @@ impl<F, Fut, T, E, Args> std::fmt::Debug for FromFnAsync<F, Fut, T, E, Args> {
 }
 impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsync<F, Fut, T, E, Args>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     Self: HandlerTypes,
     <Self as HandlerTypes>::Ok: Display,
 {
@@ -164,18 +161,17 @@ where
 }
 impl<Context, F, Fut, T, E, Args> CliBindings<Context> for FromFnAsync<F, Fut, T, E, Args>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     Self: HandlerTypes,
     Self::Params: CommandFactory + FromArgMatches + Serialize,
     Self: PrintCliResult<Context>,
 {
-    fn cli_command(&self, _: TypeId) -> clap::Command {
+    fn cli_command(&self) -> clap::Command {
         Self::Params::command()
     }
     fn cli_parse(
         &self,
         matches: &clap::ArgMatches,
-        _: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
         Self::Params::from_arg_matches(matches).and_then(|a| {
             Ok((
@@ -232,7 +228,7 @@ where
         + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
-    Context: IntoContext,
+    Context: crate::Context,
     Params: Send + Sync,
     InheritedParams: Send + Sync,
 {
@@ -242,7 +238,7 @@ where
     type Err = E;
 }
 
-impl<F, T, E, Context, Params, InheritedParams> Handler<Context>
+impl<F, T, E, Context, Params, InheritedParams> HandlerFor<Context>
     for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
     F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Result<T, E>
@@ -252,7 +248,7 @@ where
         + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
-    Context: IntoContext,
+    Context: crate::Context,
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
 {
@@ -272,7 +268,7 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
@@ -283,7 +279,7 @@ where
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
-    Context: IntoContext,
+    Context: crate::Context,
     Params: Send + Sync,
     InheritedParams: Send + Sync,
 {
@@ -293,14 +289,14 @@ where
     type Err = E;
 }
 
-impl<F, Fut, T, E, Context, Params, InheritedParams> Handler<Context>
+impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
     F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
-    Context: IntoContext,
+    Context: crate::Context,
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
 {
@@ -310,7 +306,7 @@ where
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args).await
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
@@ -327,9 +323,9 @@ where
     type Err = E;
 }
 
-impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, ()>
+impl<Context, F, T, E> HandlerFor<Context> for FromFn<F, T, E, ()>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn() -> Result<T, E> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -347,7 +343,7 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
@@ -364,9 +360,9 @@ where
     type Err = E;
 }
 
-impl<Context, F, Fut, T, E> Handler<Context> for FromFnAsync<F, Fut, T, E, ()>
+impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsync<F, Fut, T, E, ()>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn() -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
@@ -375,14 +371,14 @@ where
     async fn handle_async(&self, _: HandlerArgsFor<Context, Self>) -> Result<Self::Ok, Self::Err> {
         (self.function)().await
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
 
 impl<Context, F, T, E> HandlerTypes for FromFn<F, T, E, (Context,)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context) -> Result<T, E> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -393,9 +389,9 @@ where
     type Err = E;
 }
 
-impl<Context, F, T, E> Handler<Context> for FromFn<F, T, E, (Context,)>
+impl<Context, F, T, E> HandlerFor<Context> for FromFn<F, T, E, (Context,)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context) -> Result<T, E> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -416,13 +412,13 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
 impl<Context, F, Fut, T, E> HandlerTypes for FromFnAsync<F, Fut, T, E, (Context,)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
@@ -434,9 +430,9 @@ where
     type Err = E;
 }
 
-impl<Context, F, Fut, T, E> Handler<Context> for FromFnAsync<F, Fut, T, E, (Context,)>
+impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsync<F, Fut, T, E, (Context,)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
@@ -448,14 +444,14 @@ where
     ) -> Result<Self::Ok, Self::Err> {
         (self.function)(handle_args.context).await
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
 
 impl<Context, F, T, E, Params> HandlerTypes for FromFn<F, T, E, (Context, Params)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context, Params) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
     T: Send + Sync + 'static,
@@ -467,9 +463,9 @@ where
     type Err = E;
 }
 
-impl<Context, F, T, E, Params> Handler<Context> for FromFn<F, T, E, (Context, Params)>
+impl<Context, F, T, E, Params> HandlerFor<Context> for FromFn<F, T, E, (Context, Params)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context, Params) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
     T: Send + Sync + 'static,
@@ -494,13 +490,13 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
 impl<Context, F, Fut, T, E, Params> HandlerTypes for FromFnAsync<F, Fut, T, E, (Context, Params)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
@@ -513,10 +509,10 @@ where
     type Err = E;
 }
 
-impl<Context, F, Fut, T, E, Params> Handler<Context>
+impl<Context, F, Fut, T, E, Params> HandlerFor<Context>
     for FromFnAsync<F, Fut, T, E, (Context, Params)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
@@ -532,7 +528,7 @@ where
         } = handle_args;
         (self.function)(context, params).await
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
@@ -540,7 +536,7 @@ where
 impl<Context, F, T, E, Params, InheritedParams> HandlerTypes
     for FromFn<F, T, E, (Context, Params, InheritedParams)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
@@ -553,10 +549,10 @@ where
     type Err = E;
 }
 
-impl<Context, F, T, E, Params, InheritedParams> Handler<Context>
+impl<Context, F, T, E, Params, InheritedParams> HandlerFor<Context>
     for FromFn<F, T, E, (Context, Params, InheritedParams)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
@@ -585,14 +581,14 @@ where
             self.handle_async_with_sync(handle_args).await
         }
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }
 impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerTypes
     for FromFnAsync<F, Fut, T, E, (Context, Params, InheritedParams)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
@@ -606,10 +602,10 @@ where
     type Err = E;
 }
 
-impl<Context, F, Fut, T, E, Params, InheritedParams> Handler<Context>
+impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsync<F, Fut, T, E, (Context, Params, InheritedParams)>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
@@ -629,7 +625,7 @@ where
         } = handle_args;
         (self.function)(context, params, inherited_params).await
     }
-    fn metadata(&self, _: VecDeque<&'static str>, _: TypeId) -> OrdMap<&'static str, Value> {
+    fn metadata(&self, _: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
         self.metadata.clone()
     }
 }

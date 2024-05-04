@@ -1,5 +1,3 @@
-use std::any::TypeId;
-
 use axum::body::Body;
 use axum::extract::Request;
 use axum::handler::Handler;
@@ -257,7 +255,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                     match self
                         .inner
                         .root_handler
-                        .method_from_dots(req.method.as_str(), TypeId::of::<Context>())
+                        .method_from_dots(req.method.as_str())
                     {
                         Some(a) => a,
                         None => {
@@ -267,7 +265,6 @@ impl<Context: crate::Context> HttpServer<Context> {
                             }
                         }
                     },
-                    TypeId::of::<Context>(),
                 )
                 .into_iter()
                 .map(|(key, value)| (key.into(), value))

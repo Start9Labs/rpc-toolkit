@@ -1,4 +1,3 @@
-use std::any::TypeId;
 use std::collections::VecDeque;
 use std::ffi::OsString;
 
@@ -15,8 +14,8 @@ use yajrc::{Id, RpcError};
 
 use crate::util::{internal_error, invalid_params, parse_error, without, Flat, PhantomData};
 use crate::{
-    AnyHandler, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs,
-    HandlerArgsFor, HandlerTypes, IntoContext, Name, ParentHandler, PrintCliResult,
+    AnyHandler, CliBindings, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, HandlerArgs,
+    HandlerArgsFor, HandlerFor, HandlerTypes, Name, ParentHandler, PrintCliResult,
 };
 
 type GenericRpcMethod<'a> = yajrc::GenericRpcMethod<&'a str, Value, Value>;
@@ -26,14 +25,14 @@ type RpcResponse<'a> = yajrc::RpcResponse<GenericRpcMethod<'static>>;
 pub struct CliApp<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches> {
     _phantom: PhantomData<(Context, Config)>,
     make_ctx: Box<dyn FnOnce(Config) -> Result<Context, RpcError> + Send + Sync>,
-    root_handler: ParentHandler,
+    root_handler: ParentHandler<Context>,
 }
 impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
     CliApp<Context, Config>
 {
     pub fn new<MakeCtx: FnOnce(Config) -> Result<Context, RpcError> + Send + Sync + 'static>(
         make_ctx: MakeCtx,
-        root_handler: ParentHandler,
+        root_handler: ParentHandler<Context>,
     ) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -42,29 +41,19 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
         }
     }
     pub fn run(self, args: impl IntoIterator<Item = OsString>) -> Result<(), RpcError> {
-        let ctx_ty = TypeId::of::<Context>();
         let mut cmd = Config::command();
-        for (name, handlers) in &self.root_handler.subcommands.0 {
-            if let (Name(Some(name)), Some(cli)) = (
-                name,
-                if let Some(handler) = handlers.get(&Some(ctx_ty)) {
-                    handler.cli()
-                } else if let Some(handler) = handlers.get(&None) {
-                    handler.cli()
-                } else {
-                    None
-                },
-            ) {
-                cmd = cmd.subcommand(cli.cli_command(ctx_ty).name(name));
+        for (name, handler) in &self.root_handler.subcommands.0 {
+            if let (Name(Some(name)), Some(cli)) = (name, handler.cli()) {
+                cmd = cmd.subcommand(cli.cli_command().name(name));
             }
         }
         let matches = cmd.get_matches_from(args);
         let config = Config::from_arg_matches(&matches)?;
         let ctx = (self.make_ctx)(config)?;
         let root_handler = AnyHandler::new(self.root_handler);
-        let (method, params) = root_handler.cli_parse(&matches, ctx_ty)?;
+        let (method, params) = root_handler.cli_parse(&matches)?;
         let res = root_handler.handle_sync(HandleAnyArgs {
-            context: ctx.clone().upcast(),
+            context: ctx.clone(),
             parent_method: VecDeque::new(),
             method: method.clone(),
             params: params.clone(),
@@ -72,7 +61,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
         })?;
         root_handler.cli_display(
             HandleAnyArgs {
-                context: ctx.upcast(),
+                context: ctx,
                 parent_method: VecDeque::new(),
                 method,
                 params,
@@ -220,12 +209,12 @@ where
     type Err = RemoteHandler::Err;
 }
 
-impl<Context, RemoteContext, RemoteHandler, Extra> Handler<Context>
+impl<Context, RemoteContext, RemoteHandler, Extra> HandlerFor<Context>
     for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
 where
     Context: CallRemote<RemoteContext, Extra>,
-    RemoteContext: IntoContext,
-    RemoteHandler: Handler<RemoteContext>,
+    RemoteContext: crate::Context,
+    RemoteHandler: HandlerFor<RemoteContext>,
     RemoteHandler::Params: Serialize,
     RemoteHandler::InheritedParams: Serialize,
     RemoteHandler::Ok: DeserializeOwned,
@@ -282,6 +271,51 @@ where
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
         self.handler.print(
+            HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params: params.0,
+                inherited_params,
+                raw_params,
+            },
+            result,
+        )
+    }
+}
+impl<Context, RemoteContext, RemoteHandler, Extra> CliBindings<Context>
+    for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
+where
+    Context: crate::Context,
+    RemoteHandler: CliBindings<Context>,
+    RemoteHandler::Params: Serialize,
+    RemoteHandler::InheritedParams: Serialize,
+    RemoteHandler::Ok: DeserializeOwned,
+    RemoteHandler::Err: From<RpcError>,
+    Extra: Send + Sync + 'static,
+{
+    fn cli_command(&self) -> clap::Command {
+        self.handler.cli_command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        self.handler.cli_parse(matches)
+    }
+    fn cli_display(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.handler.cli_display(
             HandlerArgs {
                 context,
                 parent_method,

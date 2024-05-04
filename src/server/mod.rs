@@ -1,4 +1,3 @@
-use std::any::TypeId;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -8,7 +7,7 @@ use imbl_value::Value;
 use yajrc::{RpcError, RpcMethod};
 
 use crate::util::{invalid_request, JobRunner};
-use crate::{AnyHandler, HandleAny, HandleAnyArgs, IntoContext, ParentHandler};
+use crate::{AnyHandler, Empty, HandleAny, HandleAnyArgs, ParentHandler};
 
 pub type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
 pub type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
@@ -23,7 +22,7 @@ pub use socket::*;
 
 pub struct Server<Context: crate::Context> {
     make_ctx: Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
-    root_handler: Arc<AnyHandler<Context, ParentHandler<Context>>>,
+    root_handler: Arc<AnyHandler<Context, Empty, ParentHandler<Context>>>,
 }
 impl<Context: crate::Context> Clone for Server<Context> {
     fn clone(&self) -> Self {
@@ -55,14 +54,13 @@ impl<Context: crate::Context> Server<Context> {
         let (make_ctx, root_handler, method) = (
             self.make_ctx.clone(),
             self.root_handler.clone(),
-            self.root_handler
-                .method_from_dots(method, TypeId::of::<Context>()),
+            self.root_handler.method_from_dots(method),
         );
 
         async move {
             root_handler
                 .handle_async(HandleAnyArgs {
-                    context: make_ctx().await?.upcast(),
+                    context: make_ctx().await?,
                     parent_method: VecDeque::new(),
                     method: method.ok_or_else(|| yajrc::METHOD_NOT_FOUND_ERROR)?,
                     params,

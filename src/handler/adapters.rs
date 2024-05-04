@@ -3,22 +3,22 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 
 use clap::{CommandFactory, FromArgMatches};
-use imbl_value::imbl::{OrdMap, OrdSet};
+use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use yajrc::RpcError;
 
-use crate::util::{internal_error, Flat, PhantomData};
+use crate::util::{Flat, PhantomData};
 use crate::{
-    AnyContext, CallRemote, CliBindings, EitherContext, Empty, Handler, HandlerArgs,
-    HandlerArgsFor, HandlerTypes, IntoContext, PrintCliResult,
+    CallRemote, CallRemoteHandler, CliBindings, DynHandler, Handler, HandlerArgs, HandlerArgsFor,
+    HandlerFor, HandlerTypes, OrEmpty, PrintCliResult, WithContext,
 };
 
-pub trait HandlerExt<Context: IntoContext>: Handler<Context> + Sized {
+pub trait HandlerExt<Context: crate::Context>: HandlerFor<Context> + Sized {
     fn no_cli(self) -> NoCli<Self>;
     fn no_display(self) -> NoDisplay<Self>;
-    fn with_custom_display<C: IntoContext, P>(self, display: P) -> CustomDisplay<P, Self>
+    fn with_custom_display<C: crate::Context, P>(self, display: P) -> CustomDisplay<P, Self>
     where
         P: PrintCliResult<
             C,
@@ -27,7 +27,7 @@ pub trait HandlerExt<Context: IntoContext>: Handler<Context> + Sized {
             Ok = Self::Ok,
             Err = Self::Err,
         >;
-    fn with_custom_display_fn<C: IntoContext, F>(
+    fn with_custom_display_fn<C: crate::Context, F>(
         self,
         display: F,
     ) -> CustomDisplayFn<F, Self, Context>
@@ -39,17 +39,17 @@ pub trait HandlerExt<Context: IntoContext>: Handler<Context> + Sized {
     ) -> InheritanceHandler<Params, InheritedParams, Self, F>
     where
         F: Fn(Params, InheritedParams) -> Self::InheritedParams;
-    fn with_call_remote<C>(self) -> RemoteCaller<C, Self>;
+    fn with_call_remote<C>(self) -> RemoteCaller<C, Context, Self>;
 }
 
-impl<Context: IntoContext, T: Handler<Context> + Sized> HandlerExt<Context> for T {
+impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context> for T {
     fn no_cli(self) -> NoCli<Self> {
         NoCli(self)
     }
     fn no_display(self) -> NoDisplay<Self> {
         NoDisplay(self)
     }
-    fn with_custom_display<C: IntoContext, P>(self, display: P) -> CustomDisplay<P, Self>
+    fn with_custom_display<C: crate::Context, P>(self, display: P) -> CustomDisplay<P, Self>
     where
         P: PrintCliResult<
             C,
@@ -64,7 +64,7 @@ impl<Context: IntoContext, T: Handler<Context> + Sized> HandlerExt<Context> for 
             handler: self,
         }
     }
-    fn with_custom_display_fn<C: IntoContext, F>(
+    fn with_custom_display_fn<C: crate::Context, F>(
         self,
         display: F,
     ) -> CustomDisplayFn<F, Self, Context>
@@ -90,7 +90,7 @@ impl<Context: IntoContext, T: Handler<Context> + Sized> HandlerExt<Context> for 
             inherit: f,
         }
     }
-    fn with_call_remote<C>(self) -> RemoteCaller<C, Self> {
+    fn with_call_remote<C>(self) -> RemoteCaller<C, Context, Self> {
         RemoteCaller {
             _phantom: PhantomData::new(),
             handler: self,
@@ -106,21 +106,10 @@ impl<H: HandlerTypes> HandlerTypes for NoCli<H> {
     type Ok = H::Ok;
     type Err = H::Err;
 }
-// TODO: implement Handler
-
-#[derive(Debug, Clone)]
-pub struct NoDisplay<H>(pub H);
-impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-
-impl<Context, H> Handler<Context> for NoDisplay<H>
+impl<Context, H> HandlerFor<Context> for NoCli<H>
 where
-    Context: IntoContext,
-    H: Handler<Context>,
+    Context: crate::Context,
+    H: HandlerFor<Context>,
 {
     fn handle_sync(
         &self,
@@ -164,23 +153,99 @@ where
             })
             .await
     }
-    fn metadata(
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.0.metadata(method)
+    }
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.0.method_from_dots(method)
+    }
+}
+impl<Context, H> CliBindings<Context> for NoCli<H>
+where
+    Context: crate::Context,
+    H: HandlerTypes,
+{
+    const NO_CLI: bool = true;
+    fn cli_command(&self) -> clap::Command {
+        unimplemented!()
+    }
+    fn cli_parse(
         &self,
-        method: VecDeque<&'static str>,
-        ctx_ty: TypeId,
-    ) -> OrdMap<&'static str, Value> {
-        self.0.metadata(method, ctx_ty)
+        _: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        unimplemented!()
     }
-    fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        self.0.contexts()
+    fn cli_display(&self, _: HandlerArgsFor<Context, Self>, _: Self::Ok) -> Result<(), Self::Err> {
+        unimplemented!()
     }
-    fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-        self.0.method_from_dots(method, ctx_ty)
+}
+
+#[derive(Debug, Clone)]
+pub struct NoDisplay<H>(pub H);
+impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
+    type Params = H::Params;
+    type InheritedParams = H::InheritedParams;
+    type Ok = H::Ok;
+    type Err = H::Err;
+}
+
+impl<Context, H> HandlerFor<Context> for NoDisplay<H>
+where
+    Context: crate::Context,
+    H: HandlerFor<Context>,
+{
+    fn handle_sync(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0.handle_sync(HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        })
+    }
+    async fn handle_async(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0
+            .handle_async(HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            })
+            .await
+    }
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.0.metadata(method)
+    }
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.0.method_from_dots(method)
     }
 }
 impl<Context, H> PrintCliResult<Context> for NoDisplay<H>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     H: HandlerTypes,
     H::Params: FromArgMatches + CommandFactory + Serialize,
 {
@@ -204,10 +269,10 @@ where
     type Err = H::Err;
 }
 
-impl<Context, P, H> Handler<Context> for CustomDisplay<P, H>
+impl<Context, P, H> HandlerFor<Context> for CustomDisplay<P, H>
 where
-    Context: IntoContext,
-    H: Handler<Context>,
+    Context: crate::Context,
+    H: HandlerFor<Context>,
     P: Send + Sync + Clone + 'static,
 {
     fn handle_sync(
@@ -252,23 +317,16 @@ where
             })
             .await
     }
-    fn metadata(
-        &self,
-        method: VecDeque<&'static str>,
-        ctx_ty: TypeId,
-    ) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method, ctx_ty)
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.handler.metadata(method)
     }
-    fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        self.handler.contexts()
-    }
-    fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method, ctx_ty)
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.handler.method_from_dots(method)
     }
 }
 impl<Context, P, H> PrintCliResult<Context> for CustomDisplay<P, H>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     H: HandlerTypes,
     P: PrintCliResult<
             Context,
@@ -307,7 +365,7 @@ where
     }
 }
 
-pub struct CustomDisplayFn<F, H, Context = AnyContext> {
+pub struct CustomDisplayFn<F, H, Context> {
     _phantom: PhantomData<Context>,
     print: F,
     handler: H,
@@ -339,11 +397,11 @@ where
     type Err = H::Err;
 }
 
-impl<Context, F, H, C> Handler<Context> for CustomDisplayFn<F, H, C>
+impl<Context, F, H, C> HandlerFor<Context> for CustomDisplayFn<F, H, C>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     C: 'static,
-    H: Handler<Context>,
+    H: HandlerFor<Context>,
     F: Send + Sync + Clone + 'static,
 {
     fn handle_sync(
@@ -388,23 +446,16 @@ where
             })
             .await
     }
-    fn metadata(
-        &self,
-        method: VecDeque<&'static str>,
-        ctx_ty: TypeId,
-    ) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method, ctx_ty)
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.handler.metadata(method)
     }
-    fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        self.handler.contexts()
-    }
-    fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method, ctx_ty)
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.handler.method_from_dots(method)
     }
 }
 impl<F, H, Context> PrintCliResult<Context> for CustomDisplayFn<F, H, Context>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     H: HandlerTypes,
     F: Fn(HandlerArgsFor<Context, H>, H::Ok) -> Result<(), H::Err> + Send + Sync + Clone + 'static,
 {
@@ -434,11 +485,11 @@ where
     }
 }
 
-pub struct RemoteCaller<Context, H> {
-    _phantom: PhantomData<Context>,
+pub struct RemoteCaller<Context, RemoteContext, H> {
+    _phantom: PhantomData<(Context, RemoteContext)>,
     handler: H,
 }
-impl<Context, H: Clone> Clone for RemoteCaller<Context, H> {
+impl<Context, RemoteContext, H: Clone> Clone for RemoteCaller<Context, RemoteContext, H> {
     fn clone(&self) -> Self {
         Self {
             _phantom: PhantomData::new(),
@@ -446,112 +497,169 @@ impl<Context, H: Clone> Clone for RemoteCaller<Context, H> {
         }
     }
 }
-impl<Context, H: Debug> Debug for RemoteCaller<Context, H> {
+impl<Context, RemoteContext, H: Debug> Debug for RemoteCaller<Context, RemoteContext, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RemoteCaller").field(&self.handler).finish()
     }
 }
-impl<Context, H> HandlerTypes for RemoteCaller<Context, H>
-where
-    H: HandlerTypes,
-{
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
 
-impl<Context, RemoteContext, H> Handler<EitherContext<Context, RemoteContext>>
-    for RemoteCaller<Context, H>
+// impl<Context, RemoteContext, H> HandlerTypes for RemoteCaller<Context, RemoteContext, H>
+// where
+//     H: HandlerTypes,
+// {
+//     type Params = H::Params;
+//     type InheritedParams = H::InheritedParams;
+//     type Ok = H::Ok;
+//     type Err = H::Err;
+// }
+// impl<Context, RemoteContext, H> HandlerFor<RemoteContext>
+//     for RemoteCaller<Context, RemoteContext, H>
+// where
+//     Context: CallRemote<RemoteContext>,
+//     RemoteContext: crate::Context,
+//     H: HandlerFor<RemoteContext>,
+//     H::Params: Serialize,
+//     H::InheritedParams: Serialize,
+//     H::Ok: DeserializeOwned,
+//     H::Err: From<RpcError>,
+// {
+//     async fn handle_async(
+//         &self,
+//         HandlerArgs {
+//             context,
+//             parent_method,
+//             method,
+//             params,
+//             inherited_params,
+//             raw_params,
+//         }: HandlerArgsFor<RemoteContext, Self>,
+//     ) -> Result<Self::Ok, Self::Err> {
+//         self.handler
+//             .handle_async(HandlerArgs {
+//                 context,
+//                 parent_method,
+//                 method,
+//                 params,
+//                 inherited_params,
+//                 raw_params,
+//             })
+//             .await
+//     }
+//     fn metadata(
+//         &self,
+//         method: VecDeque<&'static str>,
+//         ctx_ty: TypeId,
+//     ) -> OrdMap<&'static str, Value> {
+//         self.handler.metadata(method, ctx_ty)
+//     }
+//     fn contexts(&self) -> Option<OrdSet<TypeId>> {
+//         Context::type_ids()
+//     }
+//     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
+//         self.handler.method_from_dots(method, ctx_ty)
+//     }
+// }
+// impl<Context, RemoteContext, H> HandlerFor<Context> for RemoteCaller<Context, RemoteContext, H>
+// where
+//     Context: CallRemote<RemoteContext>,
+//     RemoteContext: crate::Context,
+//     H: HandlerFor<RemoteContext>,
+//     H::Params: Serialize,
+//     H::InheritedParams: Serialize,
+//     H::Ok: DeserializeOwned,
+//     H::Err: From<RpcError>,
+// {
+//     async fn handle_async(
+//         &self,
+//         HandlerArgs {
+//             context,
+//             parent_method,
+//             method,
+//             params,
+//             inherited_params,
+//             raw_params,
+//         }: HandlerArgsFor<Context, Self>,
+//     ) -> Result<Self::Ok, Self::Err> {
+//         let full_method = parent_method.into_iter().chain(method).collect::<Vec<_>>();
+//         match context
+//             .call_remote(&full_method.join("."), raw_params, Empty {})
+//             .await
+//         {
+//             Ok(a) => imbl_value::from_value(a)
+//                 .map_err(internal_error)
+//                 .map_err(Self::Err::from),
+//             Err(e) => Err(Self::Err::from(e)),
+//         }
+//     }
+//     fn metadata(
+//         &self,
+//         method: VecDeque<&'static str>,
+//         ctx_ty: TypeId,
+//     ) -> OrdMap<&'static str, Value> {
+//         self.handler.metadata(method, ctx_ty)
+//     }
+//     fn contexts(&self) -> Option<OrdSet<TypeId>> {
+//         Context::type_ids()
+//     }
+//     fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
+//         self.handler.method_from_dots(method, ctx_ty)
+//     }
+// }
+// impl<Context, RemoteContext, H> PrintCliResult<Context> for RemoteCaller<Context, RemoteContext, H>
+// where
+//     Context: crate::Context,
+//     H: PrintCliResult<Context>,
+// {
+//     fn print(
+//         &self,
+//         HandlerArgs {
+//             context,
+//             parent_method,
+//             method,
+//             params,
+//             inherited_params,
+//             raw_params,
+//         }: HandlerArgsFor<Context, Self>,
+//         result: Self::Ok,
+//     ) -> Result<(), Self::Err> {
+//         self.handler.print(
+//             HandlerArgs {
+//                 context,
+//                 parent_method,
+//                 method,
+//                 params,
+//                 inherited_params,
+//                 raw_params,
+//             },
+//             result,
+//         )
+//     }
+// }
+impl<Context, H, Inherited, LocalContext, RemoteContext> Handler<Inherited>
+    for WithContext<Context, RemoteCaller<LocalContext, RemoteContext, H>>
 where
-    Context: CallRemote<RemoteContext>,
-    RemoteContext: IntoContext,
-    H: Handler<RemoteContext>,
-    H::Params: Serialize,
-    H::InheritedParams: Serialize,
-    H::Ok: DeserializeOwned,
+    Context: crate::Context,
+    LocalContext: crate::Context + CallRemote<RemoteContext>,
+    RemoteContext: crate::Context,
+    H: HandlerFor<RemoteContext> + CliBindings<LocalContext>,
+    H::Ok: Serialize + DeserializeOwned,
     H::Err: From<RpcError>,
+    H::Params: Serialize + DeserializeOwned,
+    H::InheritedParams: Serialize + OrEmpty<Inherited>,
+    RpcError: From<H::Err>,
+    Inherited: Send + Sync + 'static,
 {
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<EitherContext<Context, RemoteContext>, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        match context {
-            EitherContext::C1(context) => {
-                let full_method = parent_method.into_iter().chain(method).collect::<Vec<_>>();
-                match context
-                    .call_remote(&full_method.join("."), raw_params, Empty {})
-                    .await
-                {
-                    Ok(a) => imbl_value::from_value(a)
-                        .map_err(internal_error)
-                        .map_err(Self::Err::from),
-                    Err(e) => Err(Self::Err::from(e)),
-                }
-            }
-            EitherContext::C2(context) => {
-                self.handler
-                    .handle_async(HandlerArgs {
-                        context,
-                        parent_method,
-                        method,
-                        params,
-                        inherited_params,
-                        raw_params,
-                    })
-                    .await
-            }
+    type H = H;
+    fn handler_for<C: crate::Context>(self) -> Option<DynHandler<C, Inherited>> {
+        if TypeId::of::<C>() == TypeId::of::<RemoteContext>() {
+            DynHandler::new(self.handler.handler.no_cli())
+        } else if TypeId::of::<C>() == TypeId::of::<LocalContext>() {
+            DynHandler::new(CallRemoteHandler::<LocalContext, RemoteContext, _>::new(
+                self.handler.handler,
+            ))
+        } else {
+            None
         }
-    }
-    fn metadata(
-        &self,
-        method: VecDeque<&'static str>,
-        ctx_ty: TypeId,
-    ) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method, ctx_ty)
-    }
-    fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        Context::type_ids()
-    }
-    fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method, ctx_ty)
-    }
-}
-impl<Context, H> PrintCliResult<Context> for RemoteCaller<Context, H>
-where
-    Context: IntoContext,
-    H: PrintCliResult<Context>,
-{
-    fn print(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-        result: Self::Ok,
-    ) -> Result<(), Self::Err> {
-        self.handler.print(
-            HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            },
-            result,
-        )
     }
 }
 
@@ -593,13 +701,13 @@ where
     type Err = H::Err;
 }
 
-impl<Context, Params, InheritedParams, H, F> Handler<Context>
+impl<Context, Params, InheritedParams, H, F> HandlerFor<Context>
     for InheritanceHandler<Params, InheritedParams, H, F>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
-    H: Handler<Context>,
+    H: HandlerFor<Context>,
     F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
 {
     fn handle_sync(
@@ -644,39 +752,31 @@ where
             })
             .await
     }
-    fn metadata(
-        &self,
-        method: VecDeque<&'static str>,
-        ctx_ty: TypeId,
-    ) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method, ctx_ty)
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.handler.metadata(method)
     }
-    fn contexts(&self) -> Option<OrdSet<TypeId>> {
-        self.handler.contexts()
-    }
-    fn method_from_dots(&self, method: &str, ctx_ty: TypeId) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method, ctx_ty)
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.handler.method_from_dots(method)
     }
 }
 
 impl<Context, Params, InheritedParams, H, F> CliBindings<Context>
     for InheritanceHandler<Params, InheritedParams, H, F>
 where
-    Context: IntoContext,
+    Context: crate::Context,
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
     H: CliBindings<Context>,
     F: Fn(Params, InheritedParams) -> H::InheritedParams + Send + Sync + Clone + 'static,
 {
-    fn cli_command(&self, ctx_ty: TypeId) -> clap::Command {
-        self.handler.cli_command(ctx_ty)
+    fn cli_command(&self) -> clap::Command {
+        self.handler.cli_command()
     }
     fn cli_parse(
         &self,
         matches: &clap::ArgMatches,
-        ctx_ty: TypeId,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.handler.cli_parse(matches, ctx_ty)
+        self.handler.cli_parse(matches)
     }
     fn cli_display(
         &self,

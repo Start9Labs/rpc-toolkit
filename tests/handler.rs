@@ -7,8 +7,8 @@ use clap::Parser;
 use futures::future::ready;
 use imbl_value::Value;
 use rpc_toolkit::{
-    call_remote_socket, from_fn, from_fn_async, AnyContext, CallRemote, CliApp, Context, Empty,
-    HandlerExt, ParentHandler, Server,
+    call_remote_socket, from_fn, from_fn_async, CallRemote, CliApp, Context, Empty, HandlerExt,
+    ParentHandler, Server,
 };
 use serde::{Deserialize, Serialize};
 use tokio::runtime::{Handle, Runtime};
@@ -102,7 +102,7 @@ fn make_server() -> Server<ServerContext> {
     Server::new(move || ready(Ok(ctx.clone())), make_api())
 }
 
-fn make_api() -> ParentHandler {
+fn make_api<C: Context>() -> ParentHandler<C> {
     async fn a_hello(_: CliContext) -> Result<String, RpcError> {
         Ok::<_, RpcError>("Async Subcommand".to_string())
     }
@@ -118,8 +118,8 @@ fn make_api() -> ParentHandler {
     struct InheritParams {
         donde: String,
     }
-    ParentHandler::new()
-        .subcommand(
+    ParentHandler::<C>::new()
+        .subcommand::<C, _>(
             "echo",
             from_fn_async(
                 |c: ServerContext, EchoParams { next }: EchoParams| async move {
@@ -133,14 +133,14 @@ fn make_api() -> ParentHandler {
         )
         .subcommand(
             "hello",
-            from_fn(|_: AnyContext, HelloParams { whom }: HelloParams| {
+            from_fn(|_: C, HelloParams { whom }: HelloParams| {
                 Ok::<_, RpcError>(format!("Hello {whom}").to_string())
             }),
         )
         .subcommand("a_hello", from_fn_async(a_hello))
         .subcommand(
             "dondes",
-            ParentHandler::<AnyContext, InheritParams>::new().subcommand(
+            ParentHandler::<C, InheritParams>::new().subcommand(
                 "donde",
                 from_fn(|c: CliContext, _: (), donde| {
                     Ok::<_, RpcError>(
@@ -157,7 +157,7 @@ fn make_api() -> ParentHandler {
         )
         .subcommand(
             "fizz",
-            ParentHandler::<AnyContext, InheritParams>::new().root_handler(
+            ParentHandler::<C, InheritParams>::new().root_handler(
                 from_fn(|c: CliContext, _: Empty, InheritParams { donde }| {
                     Ok::<_, RpcError>(
                         format!(
@@ -172,7 +172,7 @@ fn make_api() -> ParentHandler {
         )
         .subcommand(
             "error",
-            ParentHandler::<AnyContext, InheritParams>::new().root_handler(
+            ParentHandler::<C, InheritParams>::new().root_handler(
                 from_fn(|_: CliContext, _: Empty, InheritParams { .. }| {
                     Err::<String, _>(RpcError {
                         code: 1,
