@@ -590,13 +590,12 @@ impl<Context, RemoteContext, H: Debug> Debug for RemoteCaller<Context, RemoteCon
     }
 }
 
-impl<Context, H, Inherited, LocalContext, RemoteContext> Handler<Inherited>
-    for WithContext<Context, RemoteCaller<LocalContext, RemoteContext, H>>
+impl<Context, H, Inherited, RemoteContext> Handler<Inherited>
+    for WithContext<Context, RemoteCaller<Context, RemoteContext, H>>
 where
-    Context: crate::Context,
-    LocalContext: crate::Context + CallRemote<RemoteContext>,
+    Context: crate::Context + CallRemote<RemoteContext>,
     RemoteContext: crate::Context,
-    H: HandlerFor<RemoteContext> + CliBindings<LocalContext>,
+    H: HandlerFor<RemoteContext> + CliBindings<Context>,
     H::Ok: Serialize + DeserializeOwned,
     H::Err: From<RpcError>,
     H::Params: Serialize + DeserializeOwned,
@@ -608,8 +607,8 @@ where
     fn handler_for<C: crate::Context>(self) -> Option<DynHandler<C, Inherited>> {
         if TypeId::of::<C>() == TypeId::of::<RemoteContext>() {
             DynHandler::new(self.handler.handler.no_cli())
-        } else if TypeId::of::<C>() == TypeId::of::<LocalContext>() {
-            DynHandler::new(CallRemoteHandler::<LocalContext, RemoteContext, _>::new(
+        } else if TypeId::of::<C>() == TypeId::of::<Context>() {
+            DynHandler::new(CallRemoteHandler::<Context, RemoteContext, _>::new(
                 self.handler.handler,
             ))
         } else {

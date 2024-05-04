@@ -119,7 +119,7 @@ fn make_api<C: Context>() -> ParentHandler<C> {
         donde: String,
     }
     ParentHandler::<C>::new()
-        .subcommand::<C, _>(
+        .subcommand(
             "echo",
             from_fn_async(
                 |c: ServerContext, EchoParams { next }: EchoParams| async move {
