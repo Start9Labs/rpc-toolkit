@@ -280,7 +280,7 @@ where
 {
     type H = H;
     fn handler_for<C: crate::Context>(self) -> Option<DynHandler<C, Inherited>> {
-        if TypeId::of::<Context>() == TypeId::of::<C>() {
+        if dbg!(TypeId::of::<Context>()) == dbg!(TypeId::of::<C>()) {
             Some(unsafe {
                 std::mem::transmute::<DynHandler<Context, Inherited>, DynHandler<C, Inherited>>(
                     DynHandler(Arc::new(AnyHandler::new(self.handler))),
