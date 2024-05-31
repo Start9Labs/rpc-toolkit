@@ -3,6 +3,7 @@ use std::ffi::OsString;
 
 use clap::{CommandFactory, FromArgMatches};
 use futures::Future;
+use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Client, Method};
@@ -245,6 +246,12 @@ where
                 .map_err(Self::Err::from),
             Err(e) => Err(Self::Err::from(e)),
         }
+    }
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.handler.metadata(method)
+    }
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.handler.method_from_dots(method)
     }
 }
 impl<Context, RemoteContext, RemoteHandler, Extra> PrintCliResult<Context>
