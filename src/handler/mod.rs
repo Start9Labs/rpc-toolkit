@@ -213,10 +213,11 @@ pub trait HandlerFor<Context: crate::Context>:
         &self,
         handle_args: HandlerArgsFor<Context, Self>,
     ) -> Result<Self::Ok, Self::Err> {
-        handle_args
-            .context
-            .runtime()
-            .block_on(self.handle_async(handle_args))
+        if let Some(rt) = handle_args.context.runtime() {
+            rt.block_on(self.handle_async(handle_args))
+        } else {
+            tokio::runtime::Handle::current().block_on(self.handle_async(handle_args))
+        }
     }
     fn handle_async(
         &self,
@@ -234,12 +235,14 @@ pub trait HandlerFor<Context: crate::Context>:
     ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send + 'a {
         async move {
             let s = self.clone();
-            handle_args
-                .context
-                .runtime()
-                .spawn_blocking(move || s.handle_sync(handle_args))
-                .await
-                .unwrap()
+            if let Some(rt) = handle_args.context.runtime() {
+                rt.spawn_blocking(move || s.handle_sync(handle_args)).await
+            } else {
+                tokio::runtime::Handle::current()
+                    .spawn_blocking(move || s.handle_sync(handle_args))
+                    .await
+            }
+            .unwrap()
         }
     }
     #[allow(unused_variables)]

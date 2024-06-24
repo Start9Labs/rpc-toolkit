@@ -48,16 +48,19 @@ impl CliConfig {
 
 struct CliContextSeed {
     host: PathBuf,
-    rt: OnceCell<Runtime>,
+    rt: OnceCell<Arc<Runtime>>,
 }
 #[derive(Clone)]
 struct CliContext(Arc<CliContextSeed>);
 impl Context for CliContext {
-    fn runtime(&self) -> Handle {
+    fn runtime(&self) -> Option<Arc<Runtime>> {
         if self.0.rt.get().is_none() {
-            self.0.rt.set(Runtime::new().unwrap()).unwrap();
+            let rt = Arc::new(Runtime::new().unwrap());
+            self.0.rt.set(rt.clone()).unwrap_or_default();
+            Some(rt)
+        } else {
+            self.0.rt.get().cloned()
         }
-        self.0.rt.get().unwrap().handle().clone()
     }
 }
 
