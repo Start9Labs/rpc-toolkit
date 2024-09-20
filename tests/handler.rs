@@ -239,7 +239,7 @@ async fn test_server() {
                         "bar",
                     ]
                     .iter()
-                    .map(|s| OsString::from(s)),
+                    .map(OsString::from),
                 )
                 .unwrap();
             shutdown.shutdown()

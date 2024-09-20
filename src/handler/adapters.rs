@@ -178,6 +178,7 @@ where
     Context: crate::Context,
     H: HandlerTypes,
 {
+    const NO_CLI: bool = true;
     fn cli_command(&self) -> clap::Command {
         unimplemented!()
     }
