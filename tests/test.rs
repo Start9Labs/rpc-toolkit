@@ -19,14 +19,14 @@
 // impl Context for CliContext {
 //     type Metadata = ();
 // }
-//
+
 // impl CliContextSocket for CliContext {
 //     type Stream = UnixStream;
 //     async fn connect(&self) -> std::io::Result<Self::Stream> {
 //         UnixStream::connect(&self.0).await
 //     }
 // }
-//
+
 // impl rpc_toolkit::CliContext for CliContext {
 //     async fn call_remote(
 //         &self,
@@ -92,7 +92,7 @@
 //         println!("{}", res);
 //     }
 // }
-//
+
 // impl AsyncCommand<ServerContext> for Thing1 {
 //     async fn implementation(
 //         self,
