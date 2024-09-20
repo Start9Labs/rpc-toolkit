@@ -2,7 +2,10 @@ use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 
-use clap::{CommandFactory, FromArgMatches};
+use clap::{
+    builder::{IntoResettable, StyledStr},
+    CommandFactory, FromArgMatches,
+};
 use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
@@ -40,6 +43,9 @@ pub trait HandlerExt<Context: crate::Context>: HandlerFor<Context> + Sized {
     where
         F: Fn(Params, InheritedParams) -> Self::InheritedParams;
     fn with_call_remote<C>(self) -> RemoteCaller<C, Context, Self>;
+    fn with_about<M>(self, message: M) -> WithAbout<M, Self>
+    where
+        M: IntoResettable<StyledStr>;
 }
 
 impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context> for T {
@@ -91,6 +97,16 @@ impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context
         RemoteCaller {
             _phantom: PhantomData::new(),
             handler: self,
+        }
+    }
+
+    fn with_about<M>(self, message: M) -> WithAbout<M, Self>
+    where
+        M: IntoResettable<StyledStr>,
+    {
+        WithAbout {
+            handler: self,
+            message,
         }
     }
 }
@@ -755,5 +771,98 @@ where
             },
             result,
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WithAbout<M, H> {
+    handler: H,
+    message: M,
+}
+impl<M, H> HandlerTypes for WithAbout<M, H>
+where
+    H: HandlerTypes,
+{
+    type Params = H::Params;
+    type InheritedParams = H::InheritedParams;
+    type Ok = H::Ok;
+    type Err = H::Err;
+}
+impl<Context, M, H> HandlerFor<Context> for WithAbout<M, H>
+where
+    Context: crate::Context,
+    H: HandlerFor<Context>,
+    M: Clone + Send + Sync + 'static,
+{
+    fn handle_sync(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.handler.handle_sync(HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        })
+    }
+    async fn handle_async(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.handler
+            .handle_async(HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            })
+            .await
+    }
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.handler.metadata(method)
+    }
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.handler.method_from_dots(method)
+    }
+}
+impl<Context, M, H> CliBindings<Context> for WithAbout<M, H>
+where
+    Context: crate::Context,
+    H: CliBindings<Context>,
+    M: IntoResettable<StyledStr> + Clone,
+{
+    fn cli_command(&self) -> clap::Command {
+        self.handler.cli_command().about(self.message.clone())
+    }
+    fn cli_parse(
+        &self,
+        arg_matches: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        self.handler.cli_parse(arg_matches)
+    }
+    fn cli_display(
+        &self,
+        handler: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.handler.cli_display(handler, result)
     }
 }

@@ -11,7 +11,7 @@ use rpc_toolkit::{
     ParentHandler, Server,
 };
 use serde::{Deserialize, Serialize};
-use tokio::runtime::{Handle, Runtime};
+use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, OnceCell};
 use yajrc::RpcError;
 
@@ -133,6 +133,7 @@ fn make_api<C: Context>() -> ParentHandler<C> {
                 },
             )
             .with_custom_display_fn(|_, a| Ok(println!("{a}")))
+            .with_about("Testing")
             .with_call_remote::<CliContext>(),
         )
         .subcommand(
@@ -200,18 +201,10 @@ pub fn internal_error(e: impl Display) -> RpcError {
 #[test]
 fn test_cli() {
     make_cli()
-        .run(
-            ["test-cli", "hello", "me"]
-                .iter()
-                .map(|s| OsString::from(s)),
-        )
+        .run(["test-cli", "hello", "me"].iter().map(OsString::from))
         .unwrap();
     make_cli()
-        .run(
-            ["test-cli", "fizz", "buzz"]
-                .iter()
-                .map(|s| OsString::from(s)),
-        )
+        .run(["test-cli", "fizz", "buzz"].iter().map(OsString::from))
         .unwrap();
 }
 
@@ -234,7 +227,7 @@ async fn test_server() {
                         "foo",
                     ]
                     .iter()
-                    .map(|s| OsString::from(s)),
+                    .map(OsString::from),
                 )
                 .unwrap();
             make_cli()
@@ -246,7 +239,7 @@ async fn test_server() {
                         "bar",
                     ]
                     .iter()
-                    .map(|s| OsString::from(s)),
+                    .map(OsString::from),
                 )
                 .unwrap();
             shutdown.shutdown()
