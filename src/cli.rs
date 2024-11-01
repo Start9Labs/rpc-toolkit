@@ -43,8 +43,8 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
     }
     pub fn run(self, args: impl IntoIterator<Item = OsString>) -> Result<(), RpcError> {
         let mut cmd = Config::command();
-        for (name, handler) in &self.root_handler.subcommands.0 {
-            if let (Name(Some(name)), Some(cli)) = (name, handler.cli()) {
+        for (name, handler) in &self.root_handler.subcommands.1 {
+            if let (Name(name), Some(cli)) = (name, handler.cli()) {
                 cmd = cmd.subcommand(cli.cli_command().name(name));
             }
         }
