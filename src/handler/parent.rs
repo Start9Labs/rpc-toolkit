@@ -298,14 +298,14 @@ where
     }
     fn cli_parse(
         &self,
-        matches: &ArgMatches,
+        root_matches: &ArgMatches,
     ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        let (name, matches) = match matches.subcommand() {
+        let (name, matches) = match root_matches.subcommand() {
             Some((name, matches)) => (Some(name), matches),
-            None => (None, matches),
+            None => (None, root_matches),
         };
         if let Some(name) = name {
-            let root_params = imbl_value::to_value(&Params::from_arg_matches(matches)?)
+            let root_params = imbl_value::to_value(&Params::from_arg_matches(root_matches)?)
                 .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?;
             if let Some((Name(name), cli)) = self
                 .subcommands
