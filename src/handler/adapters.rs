@@ -2,10 +2,8 @@ use std::any::TypeId;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 
-use clap::{
-    builder::{IntoResettable, StyledStr},
-    CommandFactory, FromArgMatches,
-};
+use clap::builder::{IntoResettable, StyledStr};
+use clap::{CommandFactory, FromArgMatches};
 use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
@@ -615,7 +613,7 @@ where
     H::Ok: Serialize + DeserializeOwned,
     H::Err: From<RpcError>,
     H::Params: Serialize + DeserializeOwned,
-    H::InheritedParams: Serialize + OrEmpty<Inherited>,
+    H::InheritedParams: OrEmpty<Inherited>,
     RpcError: From<H::Err>,
     Inherited: Send + Sync + 'static,
 {

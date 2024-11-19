@@ -145,7 +145,7 @@ impl<Context, Params, InheritedParams> HandlerFor<Context>
 where
     Context: crate::Context,
     Params: Send + Sync + 'static,
-    InheritedParams: Serialize + Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
 {
     fn handle_sync(
         &self,
@@ -278,7 +278,7 @@ impl<Context, Params, InheritedParams> CliBindings<Context>
 where
     Context: crate::Context,
     Params: FromArgMatches + CommandFactory + Serialize + Send + Sync + 'static,
-    InheritedParams: Serialize + Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
 {
     fn cli_command(&self) -> Command {
         let mut base = if let Some(cli) = &self.subcommands.0.as_ref().and_then(|h| h.cli()) {
