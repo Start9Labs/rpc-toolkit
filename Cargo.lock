@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "rpc-toolkit"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "async-stream",
  "async-trait",

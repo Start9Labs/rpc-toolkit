@@ -2,7 +2,7 @@
 authors = ["Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
 name = "rpc-toolkit"
-version = "0.2.3"
+version = "0.3.0"
 description = "A toolkit for creating JSON-RPC 2.0 servers with automatic cli bindings"
 license = "MIT"
 documentation = "https://docs.rs/rpc-toolkit"
