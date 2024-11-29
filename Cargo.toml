@@ -25,7 +25,7 @@ http = "1"
 http-body-util = "0.1"
 # hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
 itertools = "0.12"
-imbl-value = { git = "https://github.com/Start9Labs/imbl-value.git" }
+imbl-value = "0.1.1"
 lazy_format = "2"
 lazy_static = "1.4"
 openssl = { version = "0.10", features = ["vendored"] }

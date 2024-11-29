@@ -686,8 +686,9 @@ dependencies = [
 
 [[package]]
 name = "imbl-value"
-version = "0.1.0"
-source = "git+https://github.com/Start9Labs/imbl-value.git#3ce01b17ae5e756fc829ee5e3513a1b19b2a03fc"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17297b705cdce30ef7a47d47385ee11b2db958e810ab3775cc78e34bcdb3f709"
 dependencies = [
  "imbl",
  "serde",
