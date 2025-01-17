@@ -408,7 +408,7 @@ where
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
 pub struct Empty {}
 
-pub(crate) trait OrEmpty<T> {
+pub trait OrEmpty<T> {
     fn from_t(t: T) -> Self;
 }
 impl<T> OrEmpty<T> for T {
