@@ -16,7 +16,7 @@ cbor = ["serde_cbor"]
 default = []
 
 [dependencies]
-axum = "0.7"
+axum = "0.8"
 async-stream = "0.3"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
@@ -24,8 +24,8 @@ futures = "0.3"
 http = "1"
 http-body-util = "0.1"
 # hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
-itertools = "0.12"
-imbl-value = "0.1.1"
+itertools = "0.14"
+imbl-value = "0.2.0"
 lazy_format = "2"
 lazy_static = "1.4"
 openssl = { version = "0.10", features = ["vendored"] }
@@ -34,7 +34,7 @@ reqwest = { version = "0.12" }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11", optional = true }
 serde_json = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util", "net"] }
 url = "2"
