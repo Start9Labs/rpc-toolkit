@@ -685,9 +685,9 @@ dependencies = [
 
 [[package]]
 name = "imbl-value"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "196915700a024f30561331639c1dad08d2f8313675bfe604e97eb13cd92e73ee"
+checksum = "dbeed40ae6b2749083dc16ff2b51e4fa2d5a9507f70b09e9fb4c46acb05f7532"
 dependencies = [
  "imbl",
  "serde",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "rpc-toolkit"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-stream",
  "async-trait",
