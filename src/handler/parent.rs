@@ -12,6 +12,8 @@ use crate::{
     CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs, HandlerArgsFor,
     HandlerFor, HandlerTypes, WithContext,
 };
+#[cfg(feature = "ts-rs")]
+use crate::handler::HandleAnyTS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Name(pub(crate) &'static str);
@@ -132,12 +134,57 @@ impl<Context, Params, InheritedParams> HandlerTypes
     for ParentHandler<Context, Params, InheritedParams>
 where
     Params: Send + Sync,
-    InheritedParams: Send + Sync,
+    InheritedParams: Send + Sync, 
 {
     type Params = Params;
     type InheritedParams = InheritedParams;
     type Ok = Value;
     type Err = RpcError;
+}
+
+#[cfg(feature = "ts-rs")]
+impl<Context, Params, InheritedParams> crate::handler::HandlerTS for ParentHandler<Context, Params, InheritedParams>
+where
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+{
+    fn params_ty(&self) -> Option<String> {
+        use std::fmt::Write;
+        let mut res = "{".to_owned();
+        for (name, handler) in &self.subcommands.1 {
+            let Some(ty) = handler.params_ty() else {
+                continue;
+            };
+            write!(
+                &mut res,
+                "{}:{};",
+                serde_json::to_string(&name.0).unwrap(),
+                ty
+            )
+            .ok();
+        }
+        res.push('}');
+        Some(res)
+    }
+
+    fn return_ty(&self) -> Option<String> {
+        use std::fmt::Write;
+        let mut res = "{".to_owned();
+        for (name, handler) in &self.subcommands.1 {
+            let Some(ty) = handler.return_ty() else {
+                continue;
+            };
+            write!(
+                &mut res,
+                "{}:{};",
+                serde_json::to_string(&name.0).unwrap(),
+                ty
+            )
+            .ok();
+        }
+        res.push('}');
+        Some(res)
+    }
 }
 
 impl<Context, Params, InheritedParams> HandlerFor<Context>

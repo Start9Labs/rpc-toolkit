@@ -55,8 +55,34 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
     }
 }
 
+#[cfg(feature = "ts-rs")]
+pub(crate) trait HandleAnyTS {
+    fn params_ty(&self) -> Option<String>;
+    fn return_ty(&self) -> Option<String>;
+}
+
+#[cfg(feature = "ts-rs")]
+impl<T: HandleAnyTS> HandleAnyTS for Arc<T> {
+    fn params_ty(&self) -> Option<String> {
+        self.deref().params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.deref().return_ty()
+    }
+}
+
+#[cfg(feature = "ts-rs")]
+pub(crate) trait HandleAnyRequires: HandleAnyTS + Send + Sync {}
+#[cfg(feature = "ts-rs")]
+impl<T: HandleAnyTS + Send + Sync> HandleAnyRequires for T {}
+
+#[cfg(not(feature = "ts-rs"))]
+pub(crate) trait HandleAnyRequires: Send + Sync {}
+#[cfg(not(feature = "ts-rs"))]
+impl<T: Send + Sync> HandleAnyRequires for T {}
+
 #[async_trait::async_trait]
-pub(crate) trait HandleAny<Context>: Send + Sync {
+pub(crate) trait HandleAny<Context>: HandleAnyRequires {
     type Inherited: Send;
     fn handle_sync(
         &self,
@@ -153,6 +179,15 @@ impl<Context, Inherited> Debug for DynHandler<Context, Inherited> {
         f.debug_struct("DynHandler").finish()
     }
 }
+#[cfg(feature = "ts-rs")]
+impl<Context, Inherited> HandleAnyTS for DynHandler<Context, Inherited> {
+    fn params_ty(&self) -> Option<String> {
+        self.0.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.0.return_ty()
+    }
+}
 #[async_trait::async_trait]
 impl<Context: crate::Context, Inherited: Send> HandleAny<Context>
     for DynHandler<Context, Inherited>
@@ -206,8 +241,24 @@ pub trait HandlerTypes {
     type Err: Send + Sync;
 }
 
+#[cfg(feature = "ts-rs")]
+pub trait HandlerTS {
+    fn params_ty(&self) -> Option<String>;
+    fn return_ty(&self) -> Option<String>;
+}
+
+#[cfg(feature = "ts-rs")]
+pub trait HandlerRequires: HandlerTS + HandlerTypes + Clone + Send + Sync + 'static {}
+#[cfg(feature = "ts-rs")]
+impl<T: HandlerTS + HandlerTypes + Clone + Send + Sync + 'static> HandlerRequires for T {}
+
+#[cfg(not(feature = "ts-rs"))]
+pub trait HandlerRequires: HandlerTypes + Clone + Send + Sync + 'static {}
+#[cfg(not(feature = "ts-rs"))]
+impl<T: HandlerTypes + Clone + Send + Sync + 'static> HandlerRequires for T {}
+
 pub trait HandlerFor<Context: crate::Context>:
-    HandlerTypes + Clone + Send + Sync + 'static
+    HandlerRequires
 {
     fn handle_sync(
         &self,
@@ -321,6 +372,19 @@ impl<Context, Inherited, H: std::fmt::Debug> std::fmt::Debug for AnyHandler<Cont
     }
 }
 
+#[cfg(feature = "ts-rs")]
+impl<Context, Inherited, H> HandleAnyTS for AnyHandler<Context, Inherited, H>
+where
+    H: crate::handler::HandlerTS,
+{
+    fn params_ty(&self) -> Option<String> {
+        self.handler.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.handler.return_ty()
+    }
+}
+
 #[async_trait::async_trait]
 impl<Context, Inherited, H> HandleAny<Context> for AnyHandler<Context, Inherited, H>
 where
@@ -406,6 +470,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 pub struct Empty {}
 
 pub trait OrEmpty<T> {

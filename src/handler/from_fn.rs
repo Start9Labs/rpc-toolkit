@@ -7,6 +7,8 @@ use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+#[cfg(feature = "ts-rs")]
+use ts_rs::TS;
 
 use crate::util::PhantomData;
 use crate::{
@@ -40,6 +42,21 @@ impl<F, T, E, Args> std::fmt::Debug for FromFn<F, T, E, Args> {
         f.debug_struct("FromFn")
             .field("blocking", &self.blocking)
             .finish()
+    }
+}
+
+#[cfg(feature = "ts-rs")]
+impl<F, T, E, Args> crate::handler::HandlerTS for FromFn<F, T, E, Args>
+where
+    Self: HandlerTypes,
+    <Self as HandlerTypes>::Params: ts_rs::TS,
+    <Self as HandlerTypes>::Ok: ts_rs::TS,
+{
+    fn params_ty(&self) -> Option<String> {
+        Some(<Self as HandlerTypes>::Params::inline())
+    }
+    fn return_ty(&self) -> Option<String> {
+        Some(<Self as HandlerTypes>::Ok::inline())
     }
 }
 impl<Context, F, T, E, Args> PrintCliResult<Context> for FromFn<F, T, E, Args>
@@ -149,6 +166,21 @@ impl<F, Fut, T, E, Args> std::fmt::Debug for FromFnAsync<F, Fut, T, E, Args> {
         f.debug_struct("FromFnAsync").finish()
     }
 }
+
+#[cfg(feature = "ts-rs")]
+impl<F, Fut, T, E, Args> crate::handler::HandlerTS for FromFnAsync<F, Fut, T, E, Args>
+where
+    Self: HandlerTypes,
+    <Self as HandlerTypes>::Params: ts_rs::TS,
+    <Self as HandlerTypes>::Ok: ts_rs::TS,
+{
+    fn params_ty(&self) -> Option<String> {
+        Some(<Self as HandlerTypes>::Params::inline())
+    }
+    fn return_ty(&self) -> Option<String> {
+        Some(<Self as HandlerTypes>::Ok::inline())
+    }
+}
 impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsync<F, Fut, T, E, Args>
 where
     Context: crate::Context,
@@ -243,6 +275,21 @@ impl<F, Fut, T, E, Args> std::fmt::Debug for FromFnAsyncLocal<F, Fut, T, E, Args
         f.debug_struct("FromFnAsyncLocal").finish()
     }
 }
+
+#[cfg(feature = "ts-rs")]
+impl<F, Fut, T, E, Args> crate::handler::HandlerTS for FromFnAsyncLocal<F, Fut, T, E, Args>
+where
+    Self: HandlerTypes,
+    <Self as HandlerTypes>::Params: ts_rs::TS,
+    <Self as HandlerTypes>::Ok: ts_rs::TS,
+{
+    fn params_ty(&self) -> Option<String> {
+        Some(<Self as HandlerTypes>::Params::inline())
+    }
+    fn return_ty(&self) -> Option<String> {
+        Some(<Self as HandlerTypes>::Ok::inline())
+    }
+}
 impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsyncLocal<F, Fut, T, E, Args>
 where
     Context: crate::Context,
@@ -335,6 +382,12 @@ where
 impl<F, T, E, Context, Params, InheritedParams> HandlerFor<Context>
     for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
+    Self: crate::handler::HandlerRequires<
+        Params = Params,
+        InheritedParams = InheritedParams,
+        Ok = T,
+        Err = E,
+    >,
     F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Result<T, E>
         + Send
         + Sync
@@ -386,6 +439,12 @@ where
 impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
+    Self: crate::handler::HandlerRequires<
+        Params = Params,
+        InheritedParams = InheritedParams,
+        Ok = T,
+        Err = E,
+    >,
     F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
@@ -419,6 +478,7 @@ where
 
 impl<Context, F, T, E> HandlerFor<Context> for FromFn<F, T, E, ()>
 where
+    Self: crate::handler::HandlerRequires<Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn() -> Result<T, E> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
@@ -456,6 +516,7 @@ where
 
 impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsync<F, Fut, T, E, ()>
 where
+    Self: crate::handler::HandlerRequires<Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn() -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
@@ -485,6 +546,7 @@ where
 
 impl<Context, F, T, E> HandlerFor<Context> for FromFn<F, T, E, (Context,)>
 where
+    Self: crate::handler::HandlerRequires<Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context) -> Result<T, E> + Send + Sync + Clone + 'static,
     T: Send + Sync + 'static,
@@ -526,6 +588,7 @@ where
 
 impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsync<F, Fut, T, E, (Context,)>
 where
+    Self: crate::handler::HandlerRequires<Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
@@ -559,6 +622,7 @@ where
 
 impl<Context, F, T, E, Params> HandlerFor<Context> for FromFn<F, T, E, (Context, Params)>
 where
+    Self: crate::handler::HandlerRequires<Params = Params, Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context, Params) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
@@ -606,6 +670,7 @@ where
 impl<Context, F, Fut, T, E, Params> HandlerFor<Context>
     for FromFnAsync<F, Fut, T, E, (Context, Params)>
 where
+    Self: crate::handler::HandlerRequires<Params = Params, Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
@@ -646,6 +711,7 @@ where
 impl<Context, F, T, E, Params, InheritedParams> HandlerFor<Context>
     for FromFn<F, T, E, (Context, Params, InheritedParams)>
 where
+    Self: crate::handler::HandlerRequires<Params = Params, InheritedParams = InheritedParams, Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
@@ -699,6 +765,7 @@ where
 impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsync<F, Fut, T, E, (Context, Params, InheritedParams)>
 where
+    Self: crate::handler::HandlerRequires<Params = Params, InheritedParams = InheritedParams, Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
@@ -744,6 +811,7 @@ where
 impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsyncLocal<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
+    Self: crate::handler::HandlerRequires<Params = Params, InheritedParams = InheritedParams, Ok = T, Err = E>,
     F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,
     T: Send + Sync + 'static,
@@ -760,7 +828,8 @@ where
         if let Some(rt) = handle_args.context.runtime() {
             local.block_on(&*rt, (self.function)(handle_args))
         } else {
-            tokio::runtime::Handle::current().block_on(local.run_until((self.function)(handle_args)))
+            tokio::runtime::Handle::current()
+                .block_on(local.run_until((self.function)(handle_args)))
         }
     }
     async fn handle_async(
@@ -789,6 +858,7 @@ where
 
 impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsyncLocal<F, Fut, T, E, ()>
 where
+    Self: crate::handler::HandlerRequires<Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn() -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,
@@ -833,6 +903,7 @@ where
 
 impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsyncLocal<F, Fut, T, E, (Context,)>
 where
+    Self: crate::handler::HandlerRequires<Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,
@@ -847,7 +918,8 @@ where
         if let Some(rt) = handle_args.context.runtime() {
             local.block_on(&*rt, (self.function)(handle_args.context))
         } else {
-            tokio::runtime::Handle::current().block_on(local.run_until((self.function)(handle_args.context)))
+            tokio::runtime::Handle::current()
+                .block_on(local.run_until((self.function)(handle_args.context)))
         }
     }
     async fn handle_async(
@@ -861,7 +933,8 @@ where
     }
 }
 
-impl<Context, F, Fut, T, E, Params> HandlerTypes for FromFnAsyncLocal<F, Fut, T, E, (Context, Params)>
+impl<Context, F, Fut, T, E, Params> HandlerTypes
+    for FromFnAsyncLocal<F, Fut, T, E, (Context, Params)>
 where
     Context: crate::Context,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
@@ -879,6 +952,7 @@ where
 impl<Context, F, Fut, T, E, Params> HandlerFor<Context>
     for FromFnAsyncLocal<F, Fut, T, E, (Context, Params)>
 where
+    Self: crate::handler::HandlerRequires<Params = Params, Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context, Params) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,
@@ -892,9 +966,13 @@ where
     ) -> Result<Self::Ok, Self::Err> {
         let local = tokio::task::LocalSet::new();
         if let Some(rt) = handle_args.context.runtime() {
-            local.block_on(&*rt, (self.function)(handle_args.context, handle_args.params))
+            local.block_on(
+                &*rt,
+                (self.function)(handle_args.context, handle_args.params),
+            )
         } else {
-            tokio::runtime::Handle::current().block_on(local.run_until((self.function)(handle_args.context, handle_args.params)))
+            tokio::runtime::Handle::current()
+                .block_on(local.run_until((self.function)(handle_args.context, handle_args.params)))
         }
     }
     async fn handle_async(
@@ -928,6 +1006,7 @@ where
 impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsyncLocal<F, Fut, T, E, (Context, Params, InheritedParams)>
 where
+    Self: crate::handler::HandlerRequires<Params = Params, InheritedParams = InheritedParams, Ok = T, Err = E>,
     Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,
@@ -942,9 +1021,20 @@ where
     ) -> Result<Self::Ok, Self::Err> {
         let local = tokio::task::LocalSet::new();
         if let Some(rt) = handle_args.context.runtime() {
-            local.block_on(&*rt, (self.function)(handle_args.context, handle_args.params, handle_args.inherited_params))
+            local.block_on(
+                &*rt,
+                (self.function)(
+                    handle_args.context,
+                    handle_args.params,
+                    handle_args.inherited_params,
+                ),
+            )
         } else {
-            tokio::runtime::Handle::current().block_on(local.run_until((self.function)(handle_args.context, handle_args.params, handle_args.inherited_params)))
+            tokio::runtime::Handle::current().block_on(local.run_until((self.function)(
+                handle_args.context,
+                handle_args.params,
+                handle_args.inherited_params,
+            )))
         }
     }
     async fn handle_async(

@@ -117,6 +117,18 @@ impl<H: HandlerTypes> HandlerTypes for NoCli<H> {
     type Ok = H::Ok;
     type Err = H::Err;
 }
+#[cfg(feature = "ts-rs")]
+impl<H> crate::handler::HandlerTS for NoCli<H>
+where
+    H: crate::handler::HandlerTS,
+{
+    fn params_ty(&self) -> Option<String> {
+        self.0.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.0.return_ty()
+    }
+}
 impl<Context, H> HandlerFor<Context> for NoCli<H>
 where
     Context: crate::Context,
@@ -198,6 +210,18 @@ impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
     type InheritedParams = H::InheritedParams;
     type Ok = H::Ok;
     type Err = H::Err;
+}
+#[cfg(feature = "ts-rs")]
+impl<H> crate::handler::HandlerTS for NoDisplay<H>
+where
+    H: crate::handler::HandlerTS,
+{
+    fn params_ty(&self) -> Option<String> {
+        self.0.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.0.return_ty()
+    }
 }
 
 impl<Context, H> HandlerFor<Context> for NoDisplay<H>
@@ -308,6 +332,19 @@ where
     type InheritedParams = H::InheritedParams;
     type Ok = H::Ok;
     type Err = H::Err;
+}
+#[cfg(feature = "ts-rs")]
+impl<P, H> crate::handler::HandlerTS for CustomDisplay<P, H>
+where
+    H: crate::handler::HandlerTS,
+    P: Send + Sync + Clone + 'static,
+{
+    fn params_ty(&self) -> Option<String> {
+        self.handler.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.handler.return_ty()
+    }
 }
 
 impl<Context, P, H> HandlerFor<Context> for CustomDisplay<P, H>
@@ -466,6 +503,20 @@ where
     type InheritedParams = H::InheritedParams;
     type Ok = H::Ok;
     type Err = H::Err;
+}
+#[cfg(feature = "ts-rs")]
+impl<F, H, Context> crate::handler::HandlerTS for CustomDisplayFn<F, H, Context>
+where
+    H: crate::handler::HandlerTS,
+    F: Send + Sync + Clone + 'static,
+    Context: 'static,
+{
+    fn params_ty(&self) -> Option<String> {
+        self.handler.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.handler.return_ty()
+    }
 }
 
 impl<Context, F, H, C> HandlerFor<Context> for CustomDisplayFn<F, H, C>
@@ -669,6 +720,22 @@ where
     type Err = H::Err;
 }
 
+#[cfg(feature = "ts-rs")]
+impl<Params, InheritedParams, H, F> crate::handler::HandlerTS
+    for InheritanceHandler<Params, InheritedParams, H, F>
+where
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+    H: crate::handler::HandlerTS,
+{
+    fn params_ty(&self) -> Option<String> {
+        self.handler.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.handler.return_ty()
+    }
+}
+
 impl<Context, Params, InheritedParams, H, F> HandlerFor<Context>
     for InheritanceHandler<Params, InheritedParams, H, F>
 where
@@ -785,6 +852,19 @@ where
     type InheritedParams = H::InheritedParams;
     type Ok = H::Ok;
     type Err = H::Err;
+}
+#[cfg(feature = "ts-rs")]
+impl<M, H> crate::handler::HandlerTS for WithAbout<M, H>
+where
+    H: crate::handler::HandlerTS,
+    M: Clone + Send + Sync + 'static,
+{
+    fn params_ty(&self) -> Option<String> {
+        self.handler.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.handler.return_ty()
+    }
 }
 impl<Context, M, H> HandlerFor<Context> for WithAbout<M, H>
 where

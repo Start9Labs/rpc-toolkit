@@ -209,6 +209,21 @@ where
     type Err = RemoteHandler::Err;
 }
 
+#[cfg(feature = "ts-rs")]
+impl<Context, RemoteContext, RemoteHandler, Extra> crate::handler::HandlerTS
+    for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
+where
+    RemoteHandler: crate::handler::HandlerTS,
+    Extra: Send + Sync + 'static,
+{
+    fn params_ty(&self) -> Option<String> {
+        self.handler.params_ty()
+    }
+    fn return_ty(&self) -> Option<String> {
+        self.handler.return_ty()
+    }
+}
+
 impl<Context, RemoteContext, RemoteHandler, Extra> HandlerFor<Context>
     for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
 where
