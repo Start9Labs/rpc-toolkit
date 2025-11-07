@@ -44,6 +44,9 @@ pub trait HandlerExt<Context: crate::Context>: HandlerFor<Context> + Sized {
     fn with_about<M>(self, message: M) -> WithAbout<M, Self>
     where
         M: IntoResettable<StyledStr>;
+    fn no_ts(self) -> NoTS<Self>;
+    fn unknown_ts(self) -> UnknownTS<Self>;
+    fn custom_ts(self, params_ty: String, return_ty: String) -> CustomTS<Self>;
 }
 
 impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context> for T {
@@ -105,6 +108,22 @@ impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context
         WithAbout {
             handler: self,
             message,
+        }
+    }
+
+    fn no_ts(self) -> NoTS<Self> {
+        NoTS(self)
+    }
+
+    fn unknown_ts(self) -> UnknownTS<Self> {
+        UnknownTS(self)
+    }
+
+    fn custom_ts(self, params_ty: String, return_ty: String) -> CustomTS<Self> {
+        CustomTS {
+            handler: self,
+            params_ty,
+            return_ty,
         }
     }
 }
@@ -648,7 +667,7 @@ impl<Context, H, Inherited, RemoteContext> Handler<Inherited>
 where
     Context: crate::Context + CallRemote<RemoteContext>,
     RemoteContext: crate::Context,
-    H: HandlerFor<RemoteContext> + CliBindings<Context>,
+    H: HandlerFor<RemoteContext> + CliBindings<Context> + crate::handler::HandlerTS,
     H::Ok: Serialize + DeserializeOwned,
     H::Err: From<RpcError>,
     H::Params: Serialize + DeserializeOwned,
@@ -911,6 +930,307 @@ where
 {
     fn cli_command(&self) -> clap::Command {
         self.handler.cli_command().about(self.message.clone())
+    }
+    fn cli_parse(
+        &self,
+        arg_matches: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        self.handler.cli_parse(arg_matches)
+    }
+    fn cli_display(
+        &self,
+        handler: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.handler.cli_display(handler, result)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NoTS<H>(pub H);
+
+impl<H> HandlerTypes for NoTS<H>
+where
+    H: HandlerTypes,
+{
+    type Params = H::Params;
+    type InheritedParams = H::InheritedParams;
+    type Ok = H::Ok;
+    type Err = H::Err;
+}
+
+#[cfg(feature = "ts-rs")]
+impl<H> crate::handler::HandlerTS for NoTS<H> {
+    fn type_info(&self) -> Option<String> {
+        None
+    }
+}
+
+impl<Context, H> HandlerFor<Context> for NoTS<H>
+where
+    Context: crate::Context,
+    H: HandlerFor<Context>,
+{
+    fn handle_sync(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0.handle_sync(HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        })
+    }
+    async fn handle_async(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0
+            .handle_async(HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            })
+            .await
+    }
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.0.metadata(method)
+    }
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.0.method_from_dots(method)
+    }
+}
+
+impl<Context, H> CliBindings<Context> for NoTS<H>
+where
+    Context: crate::Context,
+    H: CliBindings<Context>,
+{
+    fn cli_command(&self) -> clap::Command {
+        self.0.cli_command()
+    }
+    fn cli_parse(
+        &self,
+        arg_matches: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        self.0.cli_parse(arg_matches)
+    }
+    fn cli_display(
+        &self,
+        handler: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.0.cli_display(handler, result)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnknownTS<H>(pub H);
+
+impl<H> HandlerTypes for UnknownTS<H>
+where
+    H: HandlerTypes,
+{
+    type Params = H::Params;
+    type InheritedParams = H::InheritedParams;
+    type Ok = H::Ok;
+    type Err = H::Err;
+}
+
+#[cfg(feature = "ts-rs")]
+impl<H> crate::handler::HandlerTS for UnknownTS<H> {
+    fn type_info(&self) -> Option<String> {
+        Some("{_PARAMS:unknown,_RETURN:unknown}".to_string())
+    }
+}
+
+impl<Context, H> HandlerFor<Context> for UnknownTS<H>
+where
+    Context: crate::Context,
+    H: HandlerFor<Context>,
+{
+    fn handle_sync(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0.handle_sync(HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        })
+    }
+    async fn handle_async(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.0
+            .handle_async(HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            })
+            .await
+    }
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.0.metadata(method)
+    }
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.0.method_from_dots(method)
+    }
+}
+
+impl<Context, H> CliBindings<Context> for UnknownTS<H>
+where
+    Context: crate::Context,
+    H: CliBindings<Context>,
+{
+    fn cli_command(&self) -> clap::Command {
+        self.0.cli_command()
+    }
+    fn cli_parse(
+        &self,
+        arg_matches: &clap::ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        self.0.cli_parse(arg_matches)
+    }
+    fn cli_display(
+        &self,
+        handler: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.0.cli_display(handler, result)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CustomTS<H> {
+    pub handler: H,
+    pub params_ty: String,
+    pub return_ty: String,
+}
+
+impl<H> HandlerTypes for CustomTS<H>
+where
+    H: HandlerTypes,
+{
+    type Params = H::Params;
+    type InheritedParams = H::InheritedParams;
+    type Ok = H::Ok;
+    type Err = H::Err;
+}
+
+#[cfg(feature = "ts-rs")]
+impl<H> crate::handler::HandlerTS for CustomTS<H> {
+    fn type_info(&self) -> Option<String> {
+        Some(format!(
+            "{{_PARAMS:{},_RETURN:{}}}",
+            self.params_ty, self.return_ty
+        ))
+    }
+}
+
+impl<Context, H> HandlerFor<Context> for CustomTS<H>
+where
+    Context: crate::Context,
+    H: HandlerFor<Context>,
+{
+    fn handle_sync(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.handler.handle_sync(HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        })
+    }
+    async fn handle_async(
+        &self,
+        HandlerArgs {
+            context,
+            parent_method,
+            method,
+            params,
+            inherited_params,
+            raw_params,
+        }: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.handler
+            .handle_async(HandlerArgs {
+                context,
+                parent_method,
+                method,
+                params,
+                inherited_params,
+                raw_params,
+            })
+            .await
+    }
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.handler.metadata(method)
+    }
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.handler.method_from_dots(method)
+    }
+}
+
+impl<Context, H> CliBindings<Context> for CustomTS<H>
+where
+    Context: crate::Context,
+    H: CliBindings<Context>,
+{
+    fn cli_command(&self) -> clap::Command {
+        self.handler.cli_command()
     }
     fn cli_parse(
         &self,

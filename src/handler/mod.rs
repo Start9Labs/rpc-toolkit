@@ -55,27 +55,21 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
     }
 }
 
-#[cfg(feature = "ts-rs")]
 pub(crate) trait HandleAnyTS {
-    fn type_info(&self) -> Option<String>;
+    #[allow(dead_code)]
+    fn type_info(&self) -> Option<String> {
+        None
+    }
 }
 
-#[cfg(feature = "ts-rs")]
 impl<T: HandleAnyTS> HandleAnyTS for Arc<T> {
     fn type_info(&self) -> Option<String> {
         self.deref().type_info()
     }
 }
 
-#[cfg(feature = "ts-rs")]
 pub(crate) trait HandleAnyRequires: HandleAnyTS + Send + Sync {}
-#[cfg(feature = "ts-rs")]
 impl<T: HandleAnyTS + Send + Sync> HandleAnyRequires for T {}
-
-#[cfg(not(feature = "ts-rs"))]
-pub(crate) trait HandleAnyRequires: Send + Sync {}
-#[cfg(not(feature = "ts-rs"))]
-impl<T: Send + Sync> HandleAnyRequires for T {}
 
 #[async_trait::async_trait]
 pub(crate) trait HandleAny<Context>: HandleAnyRequires {
@@ -175,7 +169,6 @@ impl<Context, Inherited> Debug for DynHandler<Context, Inherited> {
         f.debug_struct("DynHandler").finish()
     }
 }
-#[cfg(feature = "ts-rs")]
 impl<Context, Inherited> HandleAnyTS for DynHandler<Context, Inherited> {
     fn type_info(&self) -> Option<String> {
         self.0.type_info()
@@ -234,19 +227,18 @@ pub trait HandlerTypes {
     type Err: Send + Sync;
 }
 
-#[cfg(feature = "ts-rs")]
 pub trait HandlerTS {
     fn type_info(&self) -> Option<String>;
 }
 
-#[cfg(feature = "ts-rs")]
-pub trait HandlerRequires: HandlerTS + HandlerTypes + Clone + Send + Sync + 'static {}
-#[cfg(feature = "ts-rs")]
-impl<T: HandlerTS + HandlerTypes + Clone + Send + Sync + 'static> HandlerRequires for T {}
+#[cfg(not(feature = "ts-rs"))]
+impl<T: HandlerTypes> HandlerTS for T {
+    fn type_info(&self) -> Option<String> {
+        None
+    }
+}
 
-#[cfg(not(feature = "ts-rs"))]
 pub trait HandlerRequires: HandlerTypes + Clone + Send + Sync + 'static {}
-#[cfg(not(feature = "ts-rs"))]
 impl<T: HandlerTypes + Clone + Send + Sync + 'static> HandlerRequires for T {}
 
 pub trait HandlerFor<Context: crate::Context>: HandlerRequires {
@@ -321,7 +313,7 @@ impl<Context, H> WithContext<Context, H> {
 impl<Context, Inherited, H> Handler<Inherited> for WithContext<Context, H>
 where
     Context: crate::Context,
-    H: HandlerFor<Context> + CliBindings<Context>,
+    H: HandlerFor<Context> + CliBindings<Context> + HandlerTS,
     H::Ok: Serialize + DeserializeOwned,
     H::Params: DeserializeOwned,
     H::InheritedParams: OrEmpty<Inherited>,
@@ -362,10 +354,9 @@ impl<Context, Inherited, H: std::fmt::Debug> std::fmt::Debug for AnyHandler<Cont
     }
 }
 
-#[cfg(feature = "ts-rs")]
 impl<Context, Inherited, H> HandleAnyTS for AnyHandler<Context, Inherited, H>
 where
-    H: crate::handler::HandlerTS,
+    H: HandlerTS,
 {
     fn type_info(&self) -> Option<String> {
         self.handler.type_info()
@@ -376,7 +367,7 @@ where
 impl<Context, Inherited, H> HandleAny<Context> for AnyHandler<Context, Inherited, H>
 where
     Context: crate::Context,
-    H: HandlerFor<Context> + CliBindings<Context>,
+    H: HandlerFor<Context> + CliBindings<Context> + HandlerTS,
     H::Params: DeserializeOwned,
     H::Ok: Serialize + DeserializeOwned,
     H::InheritedParams: OrEmpty<Inherited>,

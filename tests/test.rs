@@ -1,5 +1,7 @@
 use clap::Parser;
-use rpc_toolkit::{from_fn_async, Context, Empty, HandlerTS, ParentHandler, Server};
+use rpc_toolkit::{
+    from_fn, from_fn_async, Context, Empty, HandlerExt, HandlerTS, ParentHandler, Server,
+};
 use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
@@ -14,8 +16,17 @@ struct Thing1Params {
     thing: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, Parser)]
+struct NoTSParams {
+    foo: String,
+}
+
 async fn thing1_handler(_ctx: TestContext, params: Thing1Params) -> Result<String, RpcError> {
     Ok(format!("Thing1 is {}", params.thing))
+}
+
+fn no_ts_handler(_ctx: TestContext, params: NoTSParams) -> Result<String, RpcError> {
+    Ok(format!("foo:{}", params.foo))
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
@@ -38,7 +49,8 @@ async fn test_basic_server() {
                     from_fn_async(|_ctx: TestContext, params: GroupParams| async move {
                         Ok::<_, RpcError>(format!("verbose: {}", params.verbose))
                     }),
-                ),
+                )
+                .subcommand("no-ts", from_fn(no_ts_handler).no_ts()),
         );
 
     println!("{}", root_handler.type_info().unwrap_or_default());
