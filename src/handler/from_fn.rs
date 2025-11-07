@@ -52,11 +52,12 @@ where
     <Self as HandlerTypes>::Params: ts_rs::TS,
     <Self as HandlerTypes>::Ok: ts_rs::TS,
 {
-    fn params_ty(&self) -> Option<String> {
-        Some(<Self as HandlerTypes>::Params::inline())
-    }
-    fn return_ty(&self) -> Option<String> {
-        Some(<Self as HandlerTypes>::Ok::inline())
+    fn type_info(&self) -> Option<String> {
+        Some(format!(
+            "{{_PARAMS:{},_RETURN:{}}}",
+            <Self as HandlerTypes>::Params::inline(),
+            <Self as HandlerTypes>::Ok::inline(),
+        ))
     }
 }
 impl<Context, F, T, E, Args> PrintCliResult<Context> for FromFn<F, T, E, Args>
@@ -174,11 +175,12 @@ where
     <Self as HandlerTypes>::Params: ts_rs::TS,
     <Self as HandlerTypes>::Ok: ts_rs::TS,
 {
-    fn params_ty(&self) -> Option<String> {
-        Some(<Self as HandlerTypes>::Params::inline())
-    }
-    fn return_ty(&self) -> Option<String> {
-        Some(<Self as HandlerTypes>::Ok::inline())
+    fn type_info(&self) -> Option<String> {
+        Some(format!(
+            "{{_PARAMS:{},_RETURN:{}}}",
+            <Self as HandlerTypes>::Params::inline(),
+            <Self as HandlerTypes>::Ok::inline(),
+        ))
     }
 }
 impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsync<F, Fut, T, E, Args>
@@ -283,11 +285,12 @@ where
     <Self as HandlerTypes>::Params: ts_rs::TS,
     <Self as HandlerTypes>::Ok: ts_rs::TS,
 {
-    fn params_ty(&self) -> Option<String> {
-        Some(<Self as HandlerTypes>::Params::inline())
-    }
-    fn return_ty(&self) -> Option<String> {
-        Some(<Self as HandlerTypes>::Ok::inline())
+    fn type_info(&self) -> Option<String> {
+        Some(format!(
+            "{{_PARAMS:{},_RETURN:{}}}",
+            <Self as HandlerTypes>::Params::inline(),
+            <Self as HandlerTypes>::Ok::inline(),
+        ))
     }
 }
 impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsyncLocal<F, Fut, T, E, Args>
@@ -711,7 +714,12 @@ where
 impl<Context, F, T, E, Params, InheritedParams> HandlerFor<Context>
     for FromFn<F, T, E, (Context, Params, InheritedParams)>
 where
-    Self: crate::handler::HandlerRequires<Params = Params, InheritedParams = InheritedParams, Ok = T, Err = E>,
+    Self: crate::handler::HandlerRequires<
+        Params = Params,
+        InheritedParams = InheritedParams,
+        Ok = T,
+        Err = E,
+    >,
     Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Result<T, E> + Send + Sync + Clone + 'static,
     Params: DeserializeOwned + Send + Sync + 'static,
@@ -765,7 +773,12 @@ where
 impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsync<F, Fut, T, E, (Context, Params, InheritedParams)>
 where
-    Self: crate::handler::HandlerRequires<Params = Params, InheritedParams = InheritedParams, Ok = T, Err = E>,
+    Self: crate::handler::HandlerRequires<
+        Params = Params,
+        InheritedParams = InheritedParams,
+        Ok = T,
+        Err = E,
+    >,
     Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
@@ -811,7 +824,12 @@ where
 impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsyncLocal<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
 where
-    Self: crate::handler::HandlerRequires<Params = Params, InheritedParams = InheritedParams, Ok = T, Err = E>,
+    Self: crate::handler::HandlerRequires<
+        Params = Params,
+        InheritedParams = InheritedParams,
+        Ok = T,
+        Err = E,
+    >,
     F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,
     T: Send + Sync + 'static,
@@ -1006,7 +1024,12 @@ where
 impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerFor<Context>
     for FromFnAsyncLocal<F, Fut, T, E, (Context, Params, InheritedParams)>
 where
-    Self: crate::handler::HandlerRequires<Params = Params, InheritedParams = InheritedParams, Ok = T, Err = E>,
+    Self: crate::handler::HandlerRequires<
+        Params = Params,
+        InheritedParams = InheritedParams,
+        Ok = T,
+        Err = E,
+    >,
     Context: crate::Context,
     F: Fn(Context, Params, InheritedParams) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,

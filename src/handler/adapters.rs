@@ -122,11 +122,8 @@ impl<H> crate::handler::HandlerTS for NoCli<H>
 where
     H: crate::handler::HandlerTS,
 {
-    fn params_ty(&self) -> Option<String> {
-        self.0.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.0.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.0.type_info()
     }
 }
 impl<Context, H> HandlerFor<Context> for NoCli<H>
@@ -216,11 +213,8 @@ impl<H> crate::handler::HandlerTS for NoDisplay<H>
 where
     H: crate::handler::HandlerTS,
 {
-    fn params_ty(&self) -> Option<String> {
-        self.0.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.0.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.0.type_info()
     }
 }
 
@@ -339,11 +333,8 @@ where
     H: crate::handler::HandlerTS,
     P: Send + Sync + Clone + 'static,
 {
-    fn params_ty(&self) -> Option<String> {
-        self.handler.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.handler.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.handler.type_info()
     }
 }
 
@@ -511,11 +502,8 @@ where
     F: Send + Sync + Clone + 'static,
     Context: 'static,
 {
-    fn params_ty(&self) -> Option<String> {
-        self.handler.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.handler.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.handler.type_info()
     }
 }
 
@@ -728,11 +716,8 @@ where
     InheritedParams: Send + Sync + 'static,
     H: crate::handler::HandlerTS,
 {
-    fn params_ty(&self) -> Option<String> {
-        self.handler.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.handler.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.handler.type_info()
     }
 }
 
@@ -859,11 +844,8 @@ where
     H: crate::handler::HandlerTS,
     M: Clone + Send + Sync + 'static,
 {
-    fn params_ty(&self) -> Option<String> {
-        self.handler.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.handler.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.handler.type_info()
     }
 }
 impl<Context, M, H> HandlerFor<Context> for WithAbout<M, H>

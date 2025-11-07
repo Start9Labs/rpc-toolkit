@@ -216,11 +216,8 @@ where
     RemoteHandler: crate::handler::HandlerTS,
     Extra: Send + Sync + 'static,
 {
-    fn params_ty(&self) -> Option<String> {
-        self.handler.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.handler.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.handler.type_info()
     }
 }
 

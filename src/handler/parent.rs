@@ -7,13 +7,13 @@ use imbl_value::Value;
 use serde::Serialize;
 use yajrc::RpcError;
 
+#[cfg(feature = "ts-rs")]
+use crate::handler::HandleAnyTS;
 use crate::util::{combine, Flat, PhantomData};
 use crate::{
     CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs, HandlerArgsFor,
-    HandlerFor, HandlerTypes, WithContext,
+    HandlerFor, HandlerRequires, HandlerTypes, WithContext,
 };
-#[cfg(feature = "ts-rs")]
-use crate::handler::HandleAnyTS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Name(pub(crate) &'static str);
@@ -134,7 +134,7 @@ impl<Context, Params, InheritedParams> HandlerTypes
     for ParentHandler<Context, Params, InheritedParams>
 where
     Params: Send + Sync,
-    InheritedParams: Send + Sync, 
+    InheritedParams: Send + Sync,
 {
     type Params = Params;
     type InheritedParams = InheritedParams;
@@ -143,46 +143,34 @@ where
 }
 
 #[cfg(feature = "ts-rs")]
-impl<Context, Params, InheritedParams> crate::handler::HandlerTS for ParentHandler<Context, Params, InheritedParams>
+impl<Context, Params, InheritedParams> crate::handler::HandlerTS
+    for ParentHandler<Context, Params, InheritedParams>
 where
-    Params: Send + Sync + 'static,
+    Params: ts_rs::TS + Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
 {
-    fn params_ty(&self) -> Option<String> {
+    fn type_info(&self) -> Option<String> {
         use std::fmt::Write;
         let mut res = "{".to_owned();
+        res.push_str("_CHILDREN:{");
         for (name, handler) in &self.subcommands.1 {
-            let Some(ty) = handler.params_ty() else {
+            let Some(ty) = handler.type_info() else {
                 continue;
             };
             write!(
                 &mut res,
                 "{}:{};",
                 serde_json::to_string(&name.0).unwrap(),
-                ty
+                ty,
             )
-            .ok();
+            .ok()?;
         }
-        res.push('}');
-        Some(res)
-    }
-
-    fn return_ty(&self) -> Option<String> {
-        use std::fmt::Write;
-        let mut res = "{".to_owned();
-        for (name, handler) in &self.subcommands.1 {
-            let Some(ty) = handler.return_ty() else {
-                continue;
-            };
-            write!(
-                &mut res,
-                "{}:{};",
-                serde_json::to_string(&name.0).unwrap(),
-                ty
-            )
-            .ok();
+        res.push_str("};}");
+        if let Some(ty) = self.subcommands.0.as_ref().and_then(|h| h.type_info()) {
+            write!(&mut res, "&{}", ty).ok()?;
+        } else {
+            write!(&mut res, "&{{_PARAMS:{}}}", Params::inline()).ok()?;
         }
-        res.push('}');
         Some(res)
     }
 }
@@ -190,6 +178,12 @@ where
 impl<Context, Params, InheritedParams> HandlerFor<Context>
     for ParentHandler<Context, Params, InheritedParams>
 where
+    Self: HandlerRequires<
+        Params = Params,
+        InheritedParams = InheritedParams,
+        Ok = Value,
+        Err = RpcError,
+    >,
     Context: crate::Context,
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,

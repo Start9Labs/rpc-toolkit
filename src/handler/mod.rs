@@ -57,17 +57,13 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
 
 #[cfg(feature = "ts-rs")]
 pub(crate) trait HandleAnyTS {
-    fn params_ty(&self) -> Option<String>;
-    fn return_ty(&self) -> Option<String>;
+    fn type_info(&self) -> Option<String>;
 }
 
 #[cfg(feature = "ts-rs")]
 impl<T: HandleAnyTS> HandleAnyTS for Arc<T> {
-    fn params_ty(&self) -> Option<String> {
-        self.deref().params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.deref().return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.deref().type_info()
     }
 }
 
@@ -181,11 +177,8 @@ impl<Context, Inherited> Debug for DynHandler<Context, Inherited> {
 }
 #[cfg(feature = "ts-rs")]
 impl<Context, Inherited> HandleAnyTS for DynHandler<Context, Inherited> {
-    fn params_ty(&self) -> Option<String> {
-        self.0.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.0.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.0.type_info()
     }
 }
 #[async_trait::async_trait]
@@ -243,8 +236,7 @@ pub trait HandlerTypes {
 
 #[cfg(feature = "ts-rs")]
 pub trait HandlerTS {
-    fn params_ty(&self) -> Option<String>;
-    fn return_ty(&self) -> Option<String>;
+    fn type_info(&self) -> Option<String>;
 }
 
 #[cfg(feature = "ts-rs")]
@@ -257,9 +249,7 @@ pub trait HandlerRequires: HandlerTypes + Clone + Send + Sync + 'static {}
 #[cfg(not(feature = "ts-rs"))]
 impl<T: HandlerTypes + Clone + Send + Sync + 'static> HandlerRequires for T {}
 
-pub trait HandlerFor<Context: crate::Context>:
-    HandlerRequires
-{
+pub trait HandlerFor<Context: crate::Context>: HandlerRequires {
     fn handle_sync(
         &self,
         handle_args: HandlerArgsFor<Context, Self>,
@@ -377,11 +367,8 @@ impl<Context, Inherited, H> HandleAnyTS for AnyHandler<Context, Inherited, H>
 where
     H: crate::handler::HandlerTS,
 {
-    fn params_ty(&self) -> Option<String> {
-        self.handler.params_ty()
-    }
-    fn return_ty(&self) -> Option<String> {
-        self.handler.return_ty()
+    fn type_info(&self) -> Option<String> {
+        self.handler.type_info()
     }
 }
 
@@ -471,6 +458,7 @@ where
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
 #[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-rs", ts(type = "{}"))]
 pub struct Empty {}
 
 pub trait OrEmpty<T> {

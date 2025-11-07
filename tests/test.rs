@@ -1,109 +1,77 @@
-// use std::path::PathBuf;
+use clap::Parser;
+use rpc_toolkit::{from_fn_async, Context, Empty, HandlerTS, ParentHandler, Server};
+use serde::{Deserialize, Serialize};
+use yajrc::RpcError;
 
-// use clap::Parser;
-// use futures::Future;
-// use rpc_toolkit::{
-//     AsyncCommand, CliContextSocket, Command, Contains, Context, DynCommand, LeafCommand, NoParent,
-//     ParentCommand, ParentInfo, Server, ShutdownHandle,
-// };
-// use serde::{Deserialize, Serialize};
-// use tokio::net::UnixStream;
-// use yajrc::RpcError;
+#[derive(Clone)]
+struct TestContext;
 
-// struct ServerContext;
-// impl Context for ServerContext {
-//     type Metadata = ();
-// }
+impl Context for TestContext {}
 
-// struct CliContext(PathBuf);
-// impl Context for CliContext {
-//     type Metadata = ();
-// }
+#[derive(Debug, Deserialize, Serialize, Parser)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+struct Thing1Params {
+    thing: String,
+}
 
-// impl CliContextSocket for CliContext {
-//     type Stream = UnixStream;
-//     async fn connect(&self) -> std::io::Result<Self::Stream> {
-//         UnixStream::connect(&self.0).await
-//     }
-// }
+async fn thing1_handler(_ctx: TestContext, params: Thing1Params) -> Result<String, RpcError> {
+    Ok(format!("Thing1 is {}", params.thing))
+}
 
-// impl rpc_toolkit::CliContext for CliContext {
-//     async fn call_remote(
-//         &self,
-//         method: &str,
-//         params: imbl_value::Value,
-//     ) -> Result<imbl_value::Value, RpcError> {
-//         <Self as CliContextSocket>::call_remote(self, method, params).await
-//     }
-// }
+#[derive(Debug, Deserialize, Serialize, Parser)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+struct GroupParams {
+    #[arg(short, long)]
+    verbose: bool,
+}
 
-// async fn run_server() {
-//     Server::new(
-//         vec![
-//             DynCommand::from_parent::<Group>(Contains::none()),
-//             DynCommand::from_async::<Thing1>(Contains::none()),
-//             // DynCommand::from_async::<Thing2>(Contains::none()),
-//             // DynCommand::from_sync::<Thing3>(Contains::none()),
-//             // DynCommand::from_sync::<Thing4>(Contains::none()),
-//         ],
-//         || async { Ok(ServerContext) },
-//     )
-//     .run_unix("./test.sock", |e| eprintln!("{e}"))
-//     .unwrap()
-//     .1
-//     .await
-// }
+#[tokio::test]
+async fn test_basic_server() {
+    let root_handler = ParentHandler::new()
+        .subcommand("thing1", from_fn_async(thing1_handler))
+        .subcommand(
+            "group",
+            ParentHandler::<TestContext, Empty, Empty>::new()
+                .subcommand("thing1", from_fn_async(thing1_handler))
+                .subcommand(
+                    "thing2",
+                    from_fn_async(|_ctx: TestContext, params: GroupParams| async move {
+                        Ok::<_, RpcError>(format!("verbose: {}", params.verbose))
+                    }),
+                ),
+        );
 
-// #[derive(Debug, Deserialize, Serialize, Parser)]
-// struct Group {
-//     #[arg(short, long)]
-//     verbose: bool,
-// }
-// impl Command for Group {
-//     const NAME: &'static str = "group";
-//     type Parent = NoParent;
-// }
-// impl<Ctx> ParentCommand<Ctx> for Group
-// where
-//     Ctx: Context,
-//     // SubThing: AsyncCommand<Ctx>,
-//     Thing1: AsyncCommand<Ctx>,
-// {
-//     fn subcommands(chain: rpc_toolkit::ParentChain<Self>) -> Vec<DynCommand<Ctx>> {
-//         vec![
-//             // DynCommand::from_async::<SubThing>(chain.child()),
-//             DynCommand::from_async::<Thing1>(Contains::none()),
-//         ]
-//     }
-// }
+    println!("{}", root_handler.type_info().unwrap_or_default());
 
-// #[derive(Debug, Deserialize, Serialize, Parser)]
-// struct Thing1 {
-//     thing: String,
-// }
-// impl Command for Thing1 {
-//     const NAME: &'static str = "thing1";
-//     type Parent = NoParent;
-// }
-// impl LeafCommand<ServerContext> for Thing1 {
-//     type Ok = String;
-//     type Err = RpcError;
-//     fn display(self, _: ServerContext, _: rpc_toolkit::ParentInfo<Self::Parent>, res: Self::Ok) {
-//         println!("{}", res);
-//     }
-// }
+    let server = Server::new(|| async { Ok(TestContext) }, root_handler);
 
-// impl AsyncCommand<ServerContext> for Thing1 {
-//     async fn implementation(
-//         self,
-//         _: ServerContext,
-//         _: ParentInfo<Self::Parent>,
-//     ) -> Result<Self::Ok, Self::Err> {
-//         Ok(format!("Thing1 is {}", self.thing))
-//     }
-// }
+    // Test calling thing1 directly
+    let result = server
+        .handle_command(
+            "thing1",
+            imbl_value::to_value(&Thing1Params {
+                thing: "test".to_string(),
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
 
-// #[tokio::test]
-// async fn test() {
-//     let server = tokio::spawn(run_server());
-// }
+    let response: String = imbl_value::from_value(result).unwrap();
+    assert_eq!(response, "Thing1 is test");
+
+    // Test calling group.thing1
+    let result = server
+        .handle_command(
+            "group.thing1",
+            imbl_value::to_value(&Thing1Params {
+                thing: "nested".to_string(),
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let response: String = imbl_value::from_value(result).unwrap();
+    assert_eq!(response, "Thing1 is nested");
+}
