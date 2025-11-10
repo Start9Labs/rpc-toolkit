@@ -227,6 +227,8 @@ pub trait HandlerTypes {
     type Err: Send + Sync;
 }
 
+pub trait LeafHandler {}
+
 pub trait HandlerTS {
     fn type_info(&self) -> Option<String>;
 }

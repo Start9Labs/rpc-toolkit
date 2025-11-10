@@ -14,6 +14,8 @@ use crate::{
     CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs, HandlerArgsFor,
     HandlerFor, HandlerRequires, HandlerTypes, WithContext,
 };
+#[cfg(feature = "ts-rs")]
+use crate::{CustomTS, UnknownTS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Name(pub(crate) &'static str);
@@ -86,6 +88,31 @@ impl<Context, Params, InheritedParams> ParentHandler<Context, Params, InheritedP
         self.metadata.insert(key, value);
         self
     }
+    #[cfg(feature = "ts-rs")]
+    fn type_info_impl(&self, params_ty: &str) -> Option<String> {
+        use std::fmt::Write;
+        let mut res = "{".to_owned();
+        res.push_str("_CHILDREN:{");
+        for (name, handler) in &self.subcommands.1 {
+            let Some(ty) = handler.type_info() else {
+                continue;
+            };
+            write!(
+                &mut res,
+                "{}:{};",
+                serde_json::to_string(&name.0).unwrap(),
+                ty,
+            )
+            .ok()?;
+        }
+        res.push_str("};}");
+        if let Some(ty) = self.subcommands.0.as_ref().and_then(|h| h.type_info()) {
+            write!(&mut res, "&{}", ty).ok()?;
+        } else {
+            write!(&mut res, "&{{_PARAMS:{}}}", params_ty).ok()?;
+        }
+        Some(res)
+    }
 }
 impl<Context, Params, InheritedParams> Clone for ParentHandler<Context, Params, InheritedParams> {
     fn clone(&self) -> Self {
@@ -150,28 +177,29 @@ where
     InheritedParams: Send + Sync + 'static,
 {
     fn type_info(&self) -> Option<String> {
-        use std::fmt::Write;
-        let mut res = "{".to_owned();
-        res.push_str("_CHILDREN:{");
-        for (name, handler) in &self.subcommands.1 {
-            let Some(ty) = handler.type_info() else {
-                continue;
-            };
-            write!(
-                &mut res,
-                "{}:{};",
-                serde_json::to_string(&name.0).unwrap(),
-                ty,
-            )
-            .ok()?;
-        }
-        res.push_str("};}");
-        if let Some(ty) = self.subcommands.0.as_ref().and_then(|h| h.type_info()) {
-            write!(&mut res, "&{}", ty).ok()?;
-        } else {
-            write!(&mut res, "&{{_PARAMS:{}}}", Params::inline()).ok()?;
-        }
-        Some(res)
+        self.type_info_impl(&Params::inline())
+    }
+}
+#[cfg(feature = "ts-rs")]
+impl<Context, Params, InheritedParams> crate::handler::HandlerTS
+    for CustomTS<ParentHandler<Context, Params, InheritedParams>>
+where
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+{
+    fn type_info(&self) -> Option<String> {
+        self.handler.type_info_impl(&self.params_ty)
+    }
+}
+#[cfg(feature = "ts-rs")]
+impl<Context, Params, InheritedParams> crate::handler::HandlerTS
+    for UnknownTS<ParentHandler<Context, Params, InheritedParams>>
+where
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+{
+    fn type_info(&self) -> Option<String> {
+        self.0.type_info_impl("unknown")
     }
 }
 

@@ -13,7 +13,7 @@ use yajrc::RpcError;
 use crate::util::{Flat, PhantomData};
 use crate::{
     CallRemote, CallRemoteHandler, CliBindings, DynHandler, Handler, HandlerArgs, HandlerArgsFor,
-    HandlerFor, HandlerTypes, OrEmpty, PrintCliResult, WithContext,
+    HandlerFor, HandlerTypes, LeafHandler, OrEmpty, PrintCliResult, WithContext,
 };
 
 pub trait HandlerExt<Context: crate::Context>: HandlerFor<Context> + Sized {
@@ -130,6 +130,9 @@ impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context
 
 #[derive(Debug, Clone)]
 pub struct NoCli<H>(pub H);
+
+impl<H: LeafHandler> LeafHandler for NoCli<H> {}
+
 impl<H: HandlerTypes> HandlerTypes for NoCli<H> {
     type Params = H::Params;
     type InheritedParams = H::InheritedParams;
@@ -221,6 +224,9 @@ where
 
 #[derive(Debug, Clone)]
 pub struct NoDisplay<H>(pub H);
+
+impl<H: LeafHandler> LeafHandler for NoDisplay<H> {}
+
 impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
     type Params = H::Params;
     type InheritedParams = H::InheritedParams;
@@ -337,6 +343,9 @@ pub struct CustomDisplay<P, H> {
     print: P,
     handler: H,
 }
+
+impl<P, H: LeafHandler> LeafHandler for CustomDisplay<P, H> {}
+
 impl<P, H> HandlerTypes for CustomDisplay<P, H>
 where
     H: HandlerTypes,
@@ -488,6 +497,9 @@ pub struct CustomDisplayFn<F, H, Context> {
     print: F,
     handler: H,
 }
+
+impl<F, H: LeafHandler, Context> LeafHandler for CustomDisplayFn<F, H, Context> {}
+
 impl<Context, F: Clone, H: Clone> Clone for CustomDisplayFn<F, H, Context> {
     fn clone(&self) -> Self {
         Self {
@@ -648,6 +660,12 @@ pub struct RemoteCaller<Context, RemoteContext, H> {
     _phantom: PhantomData<(Context, RemoteContext)>,
     handler: H,
 }
+
+impl<Context, RemoteContext, H: LeafHandler> LeafHandler
+    for RemoteCaller<Context, RemoteContext, H>
+{
+}
+
 impl<Context, RemoteContext, H: Clone> Clone for RemoteCaller<Context, RemoteContext, H> {
     fn clone(&self) -> Self {
         Self {
@@ -694,6 +712,12 @@ pub struct InheritanceHandler<Params, InheritedParams, H, F> {
     handler: H,
     inherit: F,
 }
+
+impl<Params, InheritedParams, H: LeafHandler, F> LeafHandler
+    for InheritanceHandler<Params, InheritedParams, H, F>
+{
+}
+
 impl<Params, InheritedParams, H: Clone, F: Clone> Clone
     for InheritanceHandler<Params, InheritedParams, H, F>
 {
@@ -848,6 +872,9 @@ pub struct WithAbout<M, H> {
     handler: H,
     message: M,
 }
+
+impl<M, H: LeafHandler> LeafHandler for WithAbout<M, H> {}
+
 impl<M, H> HandlerTypes for WithAbout<M, H>
 where
     H: HandlerTypes,
@@ -949,6 +976,8 @@ where
 #[derive(Debug, Clone)]
 pub struct NoTS<H>(pub H);
 
+impl<H: LeafHandler> LeafHandler for NoTS<H> {}
+
 impl<H> HandlerTypes for NoTS<H>
 where
     H: HandlerTypes,
@@ -1047,6 +1076,8 @@ where
 #[derive(Debug, Clone)]
 pub struct UnknownTS<H>(pub H);
 
+impl<H: LeafHandler> LeafHandler for UnknownTS<H> {}
+
 impl<H> HandlerTypes for UnknownTS<H>
 where
     H: HandlerTypes,
@@ -1058,7 +1089,7 @@ where
 }
 
 #[cfg(feature = "ts-rs")]
-impl<H> crate::handler::HandlerTS for UnknownTS<H> {
+impl<H: LeafHandler> crate::handler::HandlerTS for UnknownTS<H> {
     fn type_info(&self) -> Option<String> {
         Some("{_PARAMS:unknown,_RETURN:unknown}".to_string())
     }
@@ -1149,6 +1180,8 @@ pub struct CustomTS<H> {
     pub return_ty: String,
 }
 
+impl<H: LeafHandler> LeafHandler for CustomTS<H> {}
+
 impl<H> HandlerTypes for CustomTS<H>
 where
     H: HandlerTypes,
@@ -1160,7 +1193,7 @@ where
 }
 
 #[cfg(feature = "ts-rs")]
-impl<H> crate::handler::HandlerTS for CustomTS<H> {
+impl<H: LeafHandler> crate::handler::HandlerTS for CustomTS<H> {
     fn type_info(&self) -> Option<String> {
         Some(format!(
             "{{_PARAMS:{},_RETURN:{}}}",

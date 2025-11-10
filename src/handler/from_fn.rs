@@ -12,7 +12,8 @@ use ts_rs::TS;
 
 use crate::util::PhantomData;
 use crate::{
-    CliBindings, Empty, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes, PrintCliResult,
+    CliBindings, Empty, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes, LeafHandler,
+    PrintCliResult,
 };
 
 pub struct FromFn<F, T, E, Args> {
@@ -21,6 +22,8 @@ pub struct FromFn<F, T, E, Args> {
     blocking: bool,
     metadata: OrdMap<&'static str, Value>,
 }
+
+impl<F, T, E, Args> LeafHandler for FromFn<F, T, E, Args> {}
 impl<F, T, E, Args> FromFn<F, T, E, Args> {
     pub fn with_metadata(mut self, key: &'static str, value: Value) -> Self {
         self.metadata.insert(key, value);
@@ -147,6 +150,8 @@ pub struct FromFnAsync<F, Fut, T, E, Args> {
     function: F,
     metadata: OrdMap<&'static str, Value>,
 }
+
+impl<F, Fut, T, E, Args> LeafHandler for FromFnAsync<F, Fut, T, E, Args> {}
 impl<F, Fut, T, E, Args> FromFnAsync<F, Fut, T, E, Args> {
     pub fn with_metadata(mut self, key: &'static str, value: Value) -> Self {
         self.metadata.insert(key, value);
@@ -257,6 +262,8 @@ pub struct FromFnAsyncLocal<F, Fut, T, E, Args> {
     function: F,
     metadata: OrdMap<&'static str, Value>,
 }
+
+impl<F, Fut, T, E, Args> LeafHandler for FromFnAsyncLocal<F, Fut, T, E, Args> {}
 impl<F, Fut, T, E, Args> FromFnAsyncLocal<F, Fut, T, E, Args> {
     pub fn with_metadata(mut self, key: &'static str, value: Value) -> Self {
         self.metadata.insert(key, value);
