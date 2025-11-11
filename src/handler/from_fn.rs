@@ -58,8 +58,8 @@ where
     fn type_info(&self) -> Option<String> {
         Some(format!(
             "{{_PARAMS:{},_RETURN:{}}}",
-            <Self as HandlerTypes>::Params::inline(),
-            <Self as HandlerTypes>::Ok::inline(),
+            <Self as HandlerTypes>::Params::inline_flattened(),
+            <Self as HandlerTypes>::Ok::inline_flattened(),
         ))
     }
 }
@@ -183,8 +183,8 @@ where
     fn type_info(&self) -> Option<String> {
         Some(format!(
             "{{_PARAMS:{},_RETURN:{}}}",
-            <Self as HandlerTypes>::Params::inline(),
-            <Self as HandlerTypes>::Ok::inline(),
+            <Self as HandlerTypes>::Params::inline_flattened(),
+            <Self as HandlerTypes>::Ok::inline_flattened(),
         ))
     }
 }
@@ -295,8 +295,8 @@ where
     fn type_info(&self) -> Option<String> {
         Some(format!(
             "{{_PARAMS:{},_RETURN:{}}}",
-            <Self as HandlerTypes>::Params::inline(),
-            <Self as HandlerTypes>::Ok::inline(),
+            <Self as HandlerTypes>::Params::inline_flattened(),
+            <Self as HandlerTypes>::Ok::inline_flattened(),
         ))
     }
 }

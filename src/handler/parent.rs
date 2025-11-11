@@ -177,7 +177,7 @@ where
     InheritedParams: Send + Sync + 'static,
 {
     fn type_info(&self) -> Option<String> {
-        self.type_info_impl(&Params::inline())
+        self.type_info_impl(&Params::inline_flattened())
     }
 }
 #[cfg(feature = "ts-rs")]
