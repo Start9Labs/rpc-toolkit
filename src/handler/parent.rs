@@ -7,14 +7,14 @@ use imbl_value::Value;
 use serde::Serialize;
 use yajrc::RpcError;
 
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 use crate::handler::HandleAnyTS;
 use crate::util::{combine, Flat, PhantomData};
 use crate::{
     CliBindings, DynHandler, Empty, HandleAny, HandleAnyArgs, Handler, HandlerArgs, HandlerArgsFor,
     HandlerFor, HandlerRequires, HandlerTypes, WithContext,
 };
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 use crate::{CustomTS, UnknownTS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -88,7 +88,7 @@ impl<Context, Params, InheritedParams> ParentHandler<Context, Params, InheritedP
         self.metadata.insert(key, value);
         self
     }
-    #[cfg(feature = "ts-rs")]
+    #[cfg(feature = "ts")]
     fn type_info_impl(&self, params_ty: &str) -> Option<String> {
         use std::fmt::Write;
         let mut res = "{".to_owned();
@@ -169,7 +169,7 @@ where
     type Err = RpcError;
 }
 
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<Context, Params, InheritedParams> crate::handler::HandlerTS
     for ParentHandler<Context, Params, InheritedParams>
 where
@@ -180,7 +180,7 @@ where
         self.type_info_impl(&Params::inline_flattened())
     }
 }
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<Context, Params, InheritedParams> crate::handler::HandlerTS
     for CustomTS<ParentHandler<Context, Params, InheritedParams>>
 where
@@ -191,7 +191,7 @@ where
         self.handler.type_info_impl(&self.params_ty)
     }
 }
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<Context, Params, InheritedParams> crate::handler::HandlerTS
     for UnknownTS<ParentHandler<Context, Params, InheritedParams>>
 where

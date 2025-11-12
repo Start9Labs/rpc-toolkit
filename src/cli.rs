@@ -209,7 +209,7 @@ where
     type Err = RemoteHandler::Err;
 }
 
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<Context, RemoteContext, RemoteHandler, Extra> crate::handler::HandlerTS
     for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
 where

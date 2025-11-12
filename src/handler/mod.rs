@@ -233,7 +233,7 @@ pub trait HandlerTS {
     fn type_info(&self) -> Option<String>;
 }
 
-#[cfg(not(feature = "ts-rs"))]
+#[cfg(not(feature = "ts"))]
 impl<T: HandlerTypes> HandlerTS for T {
     fn type_info(&self) -> Option<String> {
         None
@@ -450,8 +450,8 @@ where
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
-#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-rs", ts(type = "{}"))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(type = "{}"))]
 pub struct Empty {}
 
 pub trait OrEmpty<T> {

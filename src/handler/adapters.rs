@@ -139,7 +139,7 @@ impl<H: HandlerTypes> HandlerTypes for NoCli<H> {
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<H> crate::handler::HandlerTS for NoCli<H>
 where
     H: crate::handler::HandlerTS,
@@ -233,7 +233,7 @@ impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<H> crate::handler::HandlerTS for NoDisplay<H>
 where
     H: crate::handler::HandlerTS,
@@ -355,7 +355,7 @@ where
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<P, H> crate::handler::HandlerTS for CustomDisplay<P, H>
 where
     H: crate::handler::HandlerTS,
@@ -526,7 +526,7 @@ where
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<F, H, Context> crate::handler::HandlerTS for CustomDisplayFn<F, H, Context>
 where
     H: crate::handler::HandlerTS,
@@ -751,7 +751,7 @@ where
     type Err = H::Err;
 }
 
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<Params, InheritedParams, H, F> crate::handler::HandlerTS
     for InheritanceHandler<Params, InheritedParams, H, F>
 where
@@ -884,7 +884,7 @@ where
     type Ok = H::Ok;
     type Err = H::Err;
 }
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<M, H> crate::handler::HandlerTS for WithAbout<M, H>
 where
     H: crate::handler::HandlerTS,
@@ -988,7 +988,7 @@ where
     type Err = H::Err;
 }
 
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<H> crate::handler::HandlerTS for NoTS<H> {
     fn type_info(&self) -> Option<String> {
         None
@@ -1088,7 +1088,7 @@ where
     type Err = H::Err;
 }
 
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<H: LeafHandler> crate::handler::HandlerTS for UnknownTS<H> {
     fn type_info(&self) -> Option<String> {
         Some("{_PARAMS:unknown,_RETURN:unknown}".to_string())
@@ -1192,7 +1192,7 @@ where
     type Err = H::Err;
 }
 
-#[cfg(feature = "ts-rs")]
+#[cfg(feature = "ts")]
 impl<H: LeafHandler> crate::handler::HandlerTS for CustomTS<H> {
     fn type_info(&self) -> Option<String> {
         Some(format!(

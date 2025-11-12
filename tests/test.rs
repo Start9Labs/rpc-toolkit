@@ -11,7 +11,7 @@ struct TestContext;
 impl Context for TestContext {}
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
-#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 struct Thing1Params {
     thing: String,
 }
@@ -30,7 +30,7 @@ fn no_ts_handler(_ctx: TestContext, params: NoTSParams) -> Result<String, RpcErr
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
-#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 struct GroupParams {
     #[arg(short, long)]
     verbose: bool,
