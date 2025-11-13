@@ -13,6 +13,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
+use crate::impl_ts_struct;
+use crate::ts::HandlerTSBindings;
 use crate::util::{internal_error, invalid_params, Flat};
 
 pub mod adapters;
@@ -55,21 +57,8 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
     }
 }
 
-pub(crate) trait HandleAnyTS {
-    #[allow(dead_code)]
-    fn type_info(&self) -> Option<String> {
-        None
-    }
-}
-
-impl<T: HandleAnyTS> HandleAnyTS for Arc<T> {
-    fn type_info(&self) -> Option<String> {
-        self.deref().type_info()
-    }
-}
-
-pub(crate) trait HandleAnyRequires: HandleAnyTS + Send + Sync {}
-impl<T: HandleAnyTS + Send + Sync> HandleAnyRequires for T {}
+pub(crate) trait HandleAnyRequires: HandlerTSBindings + Send + Sync {}
+impl<T: HandlerTSBindings + Send + Sync> HandleAnyRequires for T {}
 
 #[async_trait::async_trait]
 pub(crate) trait HandleAny<Context>: HandleAnyRequires {
@@ -149,7 +138,9 @@ pub trait PrintCliResult<Context: crate::Context>: HandlerTypes {
 }
 
 #[allow(private_interfaces)]
-pub struct DynHandler<Context, Inherited>(Arc<dyn HandleAny<Context, Inherited = Inherited>>);
+pub struct DynHandler<Context, Inherited>(
+    pub(crate) Arc<dyn HandleAny<Context, Inherited = Inherited>>,
+);
 impl<Context: crate::Context, Inherited> DynHandler<Context, Inherited> {
     pub fn new<C, H>(handler: H) -> Option<Self>
     where
@@ -167,11 +158,6 @@ impl<Context, Inherited> Clone for DynHandler<Context, Inherited> {
 impl<Context, Inherited> Debug for DynHandler<Context, Inherited> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DynHandler").finish()
-    }
-}
-impl<Context, Inherited> HandleAnyTS for DynHandler<Context, Inherited> {
-    fn type_info(&self) -> Option<String> {
-        self.0.type_info()
     }
 }
 #[async_trait::async_trait]
@@ -201,6 +187,12 @@ impl<Context: crate::Context, Inherited: Send> HandleAny<Context>
         self.0.cli()
     }
 }
+#[cfg(feature = "ts")]
+impl<Context, Inherited> HandlerTSBindings for DynHandler<Context, Inherited> {
+    fn get_ts<'a>(&'a self) -> Option<crate::ts::HandlerTS<'a>> {
+        self.0.get_ts()
+    }
+}
 
 #[allow(type_alias_bounds)]
 pub type HandlerArgsFor<Context: crate::Context, H: HandlerTypes + ?Sized> =
@@ -227,18 +219,19 @@ pub trait HandlerTypes {
     type Err: Send + Sync;
 }
 
+pub trait PassthroughHandlerTypes: Adapter {}
+impl<T> HandlerTypes for T
+where
+    T: PassthroughHandlerTypes,
+    T::Inner: HandlerTypes,
+{
+    type Params = <T::Inner as HandlerTypes>::Params;
+    type InheritedParams = <T::Inner as HandlerTypes>::InheritedParams;
+    type Ok = <T::Inner as HandlerTypes>::Ok;
+    type Err = <T::Inner as HandlerTypes>::Err;
+}
+
 pub trait LeafHandler {}
-
-pub trait HandlerTS {
-    fn type_info(&self) -> Option<String>;
-}
-
-#[cfg(not(feature = "ts"))]
-impl<T: HandlerTypes> HandlerTS for T {
-    fn type_info(&self) -> Option<String> {
-        None
-    }
-}
 
 pub trait HandlerRequires: HandlerTypes + Clone + Send + Sync + 'static {}
 impl<T: HandlerTypes + Clone + Send + Sync + 'static> HandlerRequires for T {}
@@ -293,6 +286,70 @@ pub trait HandlerFor<Context: crate::Context>: HandlerRequires {
         }
     }
 }
+pub trait PassthroughHandlerFor: PassthroughHandlerTypes {}
+impl<T, Context> HandlerFor<Context> for T
+where
+    T: PassthroughHandlerFor + Clone + Send + Sync + 'static,
+    T::Inner: HandlerFor<Context>,
+    Context: crate::Context,
+{
+    fn handle_async(
+        &self,
+        handle_args: HandlerArgsFor<Context, Self>,
+    ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send {
+        self.as_inner().handle_async(handle_args)
+    }
+    fn handle_async_with_sync<'a>(
+        &'a self,
+        handle_args: HandlerArgsFor<Context, Self>,
+    ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send + 'a {
+        self.as_inner().handle_async_with_sync(handle_args)
+    }
+    fn handle_async_with_sync_blocking<'a>(
+        &'a self,
+        handle_args: HandlerArgsFor<Context, Self>,
+    ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send + 'a {
+        self.as_inner().handle_async_with_sync_blocking(handle_args)
+    }
+    fn handle_sync(
+        &self,
+        handle_args: HandlerArgsFor<Context, Self>,
+    ) -> Result<Self::Ok, Self::Err> {
+        self.as_inner().handle_sync(handle_args)
+    }
+    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
+        self.as_inner().metadata(method)
+    }
+    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
+        self.as_inner().method_from_dots(method)
+    }
+}
+
+pub trait PassthroughCliBindings: PassthroughHandlerTypes {}
+impl<T, Context> CliBindings<Context> for T
+where
+    T: PassthroughCliBindings,
+    T::Inner: CliBindings<Context>,
+    Context: crate::Context,
+{
+    const NO_CLI: bool = <T::Inner as CliBindings<Context>>::NO_CLI;
+    fn cli_command(&self) -> Command {
+        self.as_inner().cli_command()
+    }
+    fn cli_parse(
+        &self,
+        matches: &ArgMatches,
+    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
+        self.as_inner().cli_parse(matches)
+    }
+    fn cli_display(
+        &self,
+        handle_args: HandlerArgsFor<Context, Self>,
+        result: Self::Ok,
+    ) -> Result<(), Self::Err> {
+        self.as_inner().cli_display(handle_args, result)
+    }
+}
 
 pub trait Handler<Inherited> {
     type H: HandlerTypes;
@@ -315,7 +372,7 @@ impl<Context, H> WithContext<Context, H> {
 impl<Context, Inherited, H> Handler<Inherited> for WithContext<Context, H>
 where
     Context: crate::Context,
-    H: HandlerFor<Context> + CliBindings<Context> + HandlerTS,
+    H: HandlerFor<Context> + CliBindings<Context> + HandlerTSBindings,
     H::Ok: Serialize + DeserializeOwned,
     H::Params: DeserializeOwned,
     H::InheritedParams: OrEmpty<Inherited>,
@@ -356,12 +413,13 @@ impl<Context, Inherited, H: std::fmt::Debug> std::fmt::Debug for AnyHandler<Cont
     }
 }
 
-impl<Context, Inherited, H> HandleAnyTS for AnyHandler<Context, Inherited, H>
+#[cfg(feature = "ts")]
+impl<Context, Inherited, H> HandlerTSBindings for AnyHandler<Context, Inherited, H>
 where
-    H: HandlerTS,
+    H: HandlerTSBindings,
 {
-    fn type_info(&self) -> Option<String> {
-        self.handler.type_info()
+    fn get_ts<'a>(&'a self) -> Option<crate::ts::HandlerTS<'a>> {
+        self.handler.get_ts()
     }
 }
 
@@ -369,7 +427,7 @@ where
 impl<Context, Inherited, H> HandleAny<Context> for AnyHandler<Context, Inherited, H>
 where
     Context: crate::Context,
-    H: HandlerFor<Context> + CliBindings<Context> + HandlerTS,
+    H: HandlerFor<Context> + CliBindings<Context> + HandlerTSBindings,
     H::Params: DeserializeOwned,
     H::Ok: Serialize + DeserializeOwned,
     H::InheritedParams: OrEmpty<Inherited>,
@@ -450,9 +508,9 @@ where
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts", ts(type = "{}"))]
+#[cfg_attr(feature = "ts", derive(visit_rs::VisitFields))]
 pub struct Empty {}
+impl_ts_struct!(Empty);
 
 pub trait OrEmpty<T> {
     fn from_t(t: T) -> Self;

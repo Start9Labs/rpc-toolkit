@@ -14,4 +14,8 @@ mod server;
 pub mod ts;
 pub mod util;
 
-#[cfg(feature = "ts")]
+#[cfg(not(feature = "ts"))]
+pub mod ts {
+    pub trait HandlerTSBindings {}
+    impl<T> HandlerTSBindings for T {}
+}

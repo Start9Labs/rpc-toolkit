@@ -13,9 +13,11 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use url::Url;
 use yajrc::{Id, RpcError};
 
+#[cfg(feature = "ts")]
+use crate::ts::HandlerTSBindings;
 use crate::util::{internal_error, invalid_params, parse_error, without, Flat, PhantomData};
 use crate::{
-    AnyHandler, CliBindings, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, HandlerArgs,
+    Adapter, AnyHandler, CliBindings, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, HandlerArgs,
     HandlerArgsFor, HandlerFor, HandlerTypes, Name, ParentHandler, PrintCliResult,
 };
 
@@ -209,15 +211,22 @@ where
     type Err = RemoteHandler::Err;
 }
 
+impl<Context, RemoteContext, RemoteHandler, Extra> Adapter
+    for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
+{
+    type Inner = RemoteHandler;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.handler
+    }
+}
 #[cfg(feature = "ts")]
-impl<Context, RemoteContext, RemoteHandler, Extra> crate::handler::HandlerTS
+impl<Context, RemoteContext, RemoteHandler, Extra> HandlerTSBindings
     for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
 where
-    RemoteHandler: crate::handler::HandlerTS,
-    Extra: Send + Sync + 'static,
+    RemoteHandler: HandlerTSBindings,
 {
-    fn type_info(&self) -> Option<String> {
-        self.handler.type_info()
+    fn get_ts<'a>(&'a self) -> Option<crate::ts::HandlerTS<'a>> {
+        self.handler.get_ts()
     }
 }
 
