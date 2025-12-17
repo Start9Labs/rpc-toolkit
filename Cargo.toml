@@ -13,7 +13,7 @@ repository = "https://github.com/Start9Labs/rpc-toolkit"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 cbor = ["serde_cbor"]
-default = ["cbor", "ts-rs"]
+default = ["cbor"]
 
 [dependencies]
 axum = "0.8"
