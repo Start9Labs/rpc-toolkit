@@ -14,7 +14,7 @@ use yajrc::{RpcError, RpcMethod};
 
 use crate::server::{RpcRequest, RpcResponse, SingleOrBatchRpcRequest};
 use crate::util::{internal_error, parse_error};
-use crate::{HandleAny, Server};
+use crate::{Context, HandleAny, Server};
 
 const FALLBACK_ERROR: &str = "{\"error\":{\"code\":-32603,\"message\":\"Internal error\",\"data\":\"Failed to serialize rpc response\"}}";
 
@@ -145,7 +145,12 @@ impl<Context: Send + 'static, T: Middleware<Context> + Send + Sync> _Middleware<
     }
 }
 
-struct DynMiddleware<Context>(Box<dyn _Middleware<Context>>);
+pub struct DynMiddleware<Context>(Box<dyn _Middleware<Context>>);
+impl<C: Context> DynMiddleware<C> {
+    pub fn new<M: Middleware<C>>(middleware: M) -> Self {
+        Self(Box::new(middleware))
+    }
+}
 impl<Context> Clone for DynMiddleware<Context> {
     fn clone(&self) -> Self {
         self.0.dyn_clone()
@@ -177,8 +182,7 @@ impl<Context: crate::Context> Server<Context> {
 }
 impl<Context: crate::Context> HttpServer<Context> {
     pub fn middleware<T: Middleware<Context>>(mut self, middleware: T) -> Self {
-        self.middleware
-            .push_back(DynMiddleware(Box::new(middleware)));
+        self.middleware.push_back(DynMiddleware::new(middleware));
         self
     }
     async fn process_http_request(&self, mut req: Request) -> Response {
