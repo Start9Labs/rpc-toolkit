@@ -1745,9 +1745,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "visit-rs"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbd4baf031bf580bc7ba411f4625a304909c975bf3d3e8d9c43ed88d23be1b8e"
+checksum = "f89c27f644c3e4ce302bc7bce5144e295405d569784e5f4921271404e600cecf"
 dependencies = [
  "async-stream",
  "futures",
@@ -1757,9 +1757,9 @@ dependencies = [
 
 [[package]]
 name = "visit-rs-derive"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2336cc680cfb205620939f0fa62348a4b6da37d1e727670f3d7d77aebc50b611"
+checksum = "2a3bfb04fd13da4fc8df24709b7a0949667f43c63691d9fecddf1d3be8af5099"
 dependencies = [
  "proc-macro2",
  "quote",

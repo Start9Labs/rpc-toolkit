@@ -6,7 +6,11 @@ use std::sync::Arc;
 
 use imbl_value::imbl::{OrdMap, Vector};
 use imbl_value::InternedString;
-use visit_rs::{Named, Static, Visit, VisitFieldsStaticNamed, Visitor};
+use visit_rs::{
+    Named, Static, StructInfo, StructInfoData, Variant, Visit, VisitFieldsStatic,
+    VisitFieldsStaticNamed, VisitVariantFieldsStatic, VisitVariantFieldsStaticNamed,
+    VisitVariantsStatic, Visitor,
+};
 
 use crate::{Adapter, FromFn, FromFnAsync, FromFnAsyncLocal, HandlerTypes, ParentHandler};
 
@@ -315,6 +319,96 @@ where
     }
 }
 
+#[derive(Default)]
+pub struct SerdeTag {
+    pub tag: Option<syn::LitStr>,
+    pub contents: Option<syn::LitStr>,
+}
+impl SerdeTag {
+    pub fn apply_meta(this: &mut Option<Self>, meta: &syn::Meta) {
+        if meta.path().is_ident("untagged") {
+            *this = None;
+        } else if meta.path().is_ident("tag") {
+            if let Some(tag) = meta.require_name_value().ok() {
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(tag),
+                    ..
+                }) = &tag.value
+                {
+                    this.get_or_insert_default().tag = Some(tag.clone());
+                }
+            }
+        } else if meta.path().is_ident("contents") {
+            if let Some(tag) = meta.require_name_value().ok() {
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(tag),
+                    ..
+                }) = &tag.value
+                {
+                    this.get_or_insert_default().contents = Some(tag.clone());
+                }
+            }
+        }
+    }
+    pub fn from_metas(metas: &[syn::Meta]) -> Option<Self> {
+        let mut res = Some(SerdeTag::default());
+        for meta in metas.into_iter().filter_map(|m| m.require_list().ok()) {
+            if meta.path.is_ident("serde") {
+                syn::parse2::<syn::Meta>(meta.tokens.clone())
+                    .ok()
+                    .as_ref()
+                    .map(|meta| Self::apply_meta(&mut res, meta));
+            }
+        }
+        for meta in metas.into_iter().filter_map(|m| m.require_list().ok()) {
+            if meta.path.is_ident("visit") {
+                if let Some(meta) = syn::parse2::<syn::Meta>(meta.tokens.clone())
+                    .ok()
+                    .as_ref()
+                    .and_then(|m| m.require_list().ok())
+                {
+                    if meta.path.is_ident("ts") {
+                        syn::parse2::<syn::Meta>(meta.tokens.clone())
+                            .ok()
+                            .as_ref()
+                            .map(|meta| Self::apply_meta(&mut res, meta));
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+impl<'a, T> Visit<TSVisitor> for Variant<'a, Static<T>>
+where
+    T: TS,
+    T: VisitVariantFieldsStaticNamed<TSVisitor> + VisitVariantFieldsStatic<TSVisitor>,
+{
+    fn visit(&self, visitor: &mut TSVisitor) -> <TSVisitor as Visitor>::Result {
+        // TODO: handle serde tagging
+        let tag = Some(SerdeTag {
+            tag: None,
+            contents: None,
+        });
+
+        if T::DATA.variant_count > 1 {
+            visitor.ts.push('|');
+        }
+        visit_struct_impl(
+            &self.info,
+            |name, visitor| {
+                if name {
+                    T::visit_variant_fields_static_named(&self.info, visitor).for_each(drop);
+                } else {
+                    T::visit_variant_fields_static(&self.info, visitor).for_each(drop);
+                }
+            },
+            visitor,
+        );
+    }
+}
+
 pub struct LiteralTS(Cow<'static, str>);
 impl Visit<TSVisitor> for LiteralTS {
     fn visit(&self, visitor: &mut TSVisitor) -> <TSVisitor as Visitor>::Result {
@@ -347,21 +441,43 @@ impl_ts!(u64,u128,i64,i128 => "bigint");
 impl_ts!(Unknown,imbl_value::Value,serde_json::Value,serde_cbor::Value => "unknown");
 impl_ts!(Never => "never");
 
+fn visit_struct_impl(
+    info: &StructInfoData,
+    fields: impl FnOnce(bool, &mut TSVisitor),
+    visitor: &mut TSVisitor,
+) {
+    if !info.named_fields && info.field_count == 1 {
+        fields(false, visitor)
+    } else {
+        if info.named_fields {
+            visitor.ts.push_str("{");
+        } else {
+            visitor.ts.push_str("[");
+        }
+        fields(true, visitor);
+        if info.named_fields {
+            visitor.ts.push_str("}");
+        } else {
+            visitor.ts.push_str("]");
+        }
+    }
+}
+
 pub fn visit_struct<T>(visitor: &mut TSVisitor)
 where
-    T: VisitFieldsStaticNamed<TSVisitor>,
+    T: VisitFieldsStaticNamed<TSVisitor> + VisitFieldsStatic<TSVisitor>,
 {
-    if T::NAMED_FIELDS {
-        visitor.ts.push_str("{");
-    } else {
-        visitor.ts.push_str("[");
-    }
-    T::visit_fields_static_named(visitor).for_each(drop);
-    if T::NAMED_FIELDS {
-        visitor.ts.push_str("}");
-    } else {
-        visitor.ts.push_str("]");
-    }
+    visit_struct_impl(
+        &T::DATA,
+        |named, visitor| {
+            if named {
+                T::visit_fields_static_named(visitor).for_each(drop);
+            } else {
+                T::visit_fields_static(visitor).for_each(drop);
+            }
+        },
+        visitor,
+    );
 }
 
 #[macro_export]
@@ -374,6 +490,17 @@ macro_rules! impl_ts_struct {
             }
         }
     };
+}
+
+pub fn visit_enum<T>(visitor: &mut TSVisitor)
+where
+    T: VisitVariantsStatic<TSVisitor>,
+{
+    if T::DATA.variant_count == 0 {
+        visitor.append_type::<Never>()
+    } else {
+        T::visit_variants_static(visitor).for_each(drop)
+    }
 }
 
 pub fn visit_map<K, V>(visitor: &mut TSVisitor)

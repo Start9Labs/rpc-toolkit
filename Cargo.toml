@@ -2,7 +2,7 @@
 authors = ["Aiden McClelland <me@drbonez.dev>"]
 description = "A toolkit for creating JSON-RPC 2.0 servers with automatic cli bindings"
 documentation = "https://docs.rs/rpc-toolkit"
-edition = "2018"
+edition = "2024"
 keywords = ["cli", "json", "rpc"]
 license = "MIT"
 name = "rpc-toolkit"
@@ -39,5 +39,5 @@ thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util", "net"] }
 url = "2"
-visit-rs = { version = "0.1.8", optional = true }
+visit-rs = { version = "0.1.9", optional = true }
 yajrc = "0.1"
