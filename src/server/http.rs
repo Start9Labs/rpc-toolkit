@@ -150,6 +150,35 @@ impl<C: Context> DynMiddleware<C> {
     pub fn new<M: Middleware<C>>(middleware: M) -> Self {
         Self(Box::new(middleware))
     }
+    pub fn process_http_request<'a>(
+        &'a mut self,
+        context: &'a C,
+        request: &'a mut Request,
+    ) -> BoxFuture<'a, Result<(), Response>> {
+        self.0.process_http_request(context, request)
+    }
+    pub fn process_rpc_request<'a>(
+        &'a mut self,
+        context: &'a C,
+        metadata: Value,
+        request: &'a mut RpcRequest,
+    ) -> BoxFuture<'a, Result<(), RpcResponse>> {
+        self.0.process_rpc_request(context, metadata, request)
+    }
+    pub fn process_rpc_response<'a>(
+        &'a mut self,
+        context: &'a C,
+        response: &'a mut RpcResponse,
+    ) -> BoxFuture<'a, ()> {
+        self.0.process_rpc_response(context, response)
+    }
+    pub fn process_http_response<'a>(
+        &'a mut self,
+        context: &'a C,
+        response: &'a mut Response,
+    ) -> BoxFuture<'a, ()> {
+        self.0.process_http_response(context, response)
+    }
 }
 impl<Context> Clone for DynMiddleware<Context> {
     fn clone(&self) -> Self {
@@ -190,7 +219,7 @@ impl<Context: crate::Context> HttpServer<Context> {
         match async {
             let ctx = (self.inner.make_ctx)().await?;
             for middleware in mid.iter_mut().rev() {
-                if let Err(e) = middleware.0.process_http_request(&ctx, &mut req).await {
+                if let Err(e) = middleware.process_http_request(&ctx, &mut req).await {
                     return Ok::<_, RpcError>(e);
                 }
             }
@@ -205,7 +234,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                         &self.process_rpc_request(&ctx, &mut mid, rpc_req).await,
                     );
                     for middleware in mid.iter_mut() {
-                        middleware.0.process_http_response(&ctx, &mut res).await;
+                        middleware.process_http_response(&ctx, &mut res).await;
                     }
                     Ok(res)
                 }
@@ -230,7 +259,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                         },
                     ) {
                         for middleware in mid.iter_mut() {
-                            middleware.0.process_http_response(&ctx, &mut res).await;
+                            middleware.process_http_response(&ctx, &mut res).await;
                         }
                     }
                     Ok(res)
@@ -277,7 +306,6 @@ impl<Context: crate::Context> HttpServer<Context> {
         let mut res = async {
             for middleware in mid.iter_mut().rev() {
                 if let Err(res) = middleware
-                    .0
                     .process_rpc_request(ctx, metadata.clone(), &mut req)
                     .await
                 {
@@ -288,7 +316,7 @@ impl<Context: crate::Context> HttpServer<Context> {
         }
         .await;
         for middleware in mid.iter_mut() {
-            middleware.0.process_rpc_response(ctx, &mut res).await;
+            middleware.process_rpc_response(ctx, &mut res).await;
         }
         res
     }
