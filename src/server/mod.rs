@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use futures::future::{join_all, BoxFuture};
 use futures::{Future, FutureExt, Stream, StreamExt};
-use imbl_value::Value;
+use imbl_value::{InternedString, Value};
 use yajrc::{RpcError, RpcMethod};
 
 use crate::util::{invalid_request, JobRunner};
 use crate::{AnyHandler, Empty, HandleAny, HandleAnyArgs, ParentHandler};
 
-pub type GenericRpcMethod = yajrc::GenericRpcMethod<String, Value, Value>;
+pub type GenericRpcMethod = yajrc::GenericRpcMethod<InternedString, Value, Value>;
 pub type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
 pub type RpcResponse = yajrc::RpcResponse<GenericRpcMethod>;
 pub type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMethod>;
