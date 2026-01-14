@@ -78,6 +78,7 @@ pub trait CallRemote<RemoteContext, Extra = Empty>: crate::Context {
     fn call_remote(
         &self,
         method: &str,
+        metadata: OrdMap<&'static str, Value>,
         params: Value,
         extra: Extra,
     ) -> impl Future<Output = Result<Value, RpcError>> + Send;
@@ -239,12 +240,13 @@ where
         let full_method = handle_args
             .parent_method
             .into_iter()
-            .chain(handle_args.method)
+            .chain(handle_args.method.clone())
             .collect::<Vec<_>>();
         match handle_args
             .context
             .call_remote(
                 &full_method.join("."),
+                self.handler.metadata(handle_args.method),
                 without(handle_args.raw_params.clone(), &handle_args.params.1)
                     .map_err(invalid_params)?,
                 handle_args.params.1,
