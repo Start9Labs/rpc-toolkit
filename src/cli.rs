@@ -27,6 +27,7 @@ pub struct CliApp<Context: crate::Context + Clone, Config: CommandFactory + From
     _phantom: PhantomData<(Context, Config)>,
     make_ctx: Box<dyn FnOnce(Config) -> Result<Context, RpcError> + Send + Sync>,
     root_handler: ParentHandler<Context>,
+    mut_cmd: Option<Box<dyn FnOnce(clap::Command) -> clap::Command + Send + Sync>>,
 }
 impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
     CliApp<Context, Config>
@@ -39,7 +40,15 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
             _phantom: PhantomData::new(),
             make_ctx: Box::new(make_ctx),
             root_handler,
+            mut_cmd: None,
         }
+    }
+    pub fn mutate_command(
+        mut self,
+        f: impl FnOnce(clap::Command) -> clap::Command + Send + Sync + 'static,
+    ) -> Self {
+        self.mut_cmd = Some(Box::new(f));
+        self
     }
     pub fn run(self, args: impl IntoIterator<Item = OsString>) -> Result<(), RpcError> {
         let mut cmd = Config::command();
@@ -47,6 +56,9 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
             if let (Name(name), Some(cli)) = (name, handler.cli()) {
                 cmd = cmd.subcommand(cli.cli_command().name(name));
             }
+        }
+        if let Some(f) = self.mut_cmd {
+            cmd = f(cmd);
         }
         let matches = cmd.get_matches_from(args);
         let config = Config::from_arg_matches(&matches)?;
