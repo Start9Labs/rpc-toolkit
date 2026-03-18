@@ -47,7 +47,11 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
         mut self,
         f: impl FnOnce(clap::Command) -> clap::Command + Send + Sync + 'static,
     ) -> Self {
-        self.mut_cmd = Some(Box::new(f));
+        self.mut_cmd = if let Some(prev) = self.mut_cmd.take() {
+            Some(Box::new(|cmd| f(prev(cmd))))
+        } else {
+            Some(Box::new(f))
+        };
         self
     }
     pub fn run(self, args: impl IntoIterator<Item = OsString>) -> Result<(), RpcError> {
