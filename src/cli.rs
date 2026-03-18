@@ -54,16 +54,23 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
         };
         self
     }
-    pub fn run(self, args: impl IntoIterator<Item = OsString>) -> Result<(), RpcError> {
+    fn command(&mut self) -> clap::Command {
         let mut cmd = Config::command();
         for (name, handler) in &self.root_handler.subcommands.1 {
             if let (Name(name), Some(cli)) = (name, handler.cli()) {
                 cmd = cmd.subcommand(cli.cli_command().name(name));
             }
         }
-        if let Some(f) = self.mut_cmd {
+        if let Some(f) = self.mut_cmd.take() {
             cmd = f(cmd);
         }
+        cmd
+    }
+    pub fn into_command(mut self) -> clap::Command {
+        self.command()
+    }
+    pub fn run(mut self, args: impl IntoIterator<Item = OsString>) -> Result<(), RpcError> {
+        let cmd = self.command();
         let matches = cmd.get_matches_from(args);
         let config = Config::from_arg_matches(&matches)?;
         let ctx = (self.make_ctx)(config)?;
