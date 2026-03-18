@@ -452,6 +452,7 @@ where
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
 #[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-rs", ts(type = "{}"))]
+#[group(skip)]
 pub struct Empty {}
 
 pub trait OrEmpty<T> {
@@ -469,4 +470,5 @@ impl<A, B> OrEmpty<Flat<A, B>> for Empty {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Parser)]
+#[group(skip)]
 pub enum Never {}
