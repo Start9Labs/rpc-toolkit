@@ -4,12 +4,12 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use imbl_value::imbl::{OrdMap, Vector};
 use imbl_value::InternedString;
+use imbl_value::imbl::{OrdMap, Vector};
+use visit_rs::metadata::{AttributeMeta, MetaValue};
 use visit_rs::{
-    Named, Static, StructInfo, StructInfoData, Variant, Visit, VisitFieldsStatic,
-    VisitFieldsStaticNamed, VisitVariantFieldsStatic, VisitVariantFieldsStaticNamed,
-    VisitVariantsStatic, Visitor,
+    Named, Static, StructInfoData, Variant, Visit, VisitFieldsStatic, VisitFieldsStaticNamed,
+    VisitVariantFieldsStatic, VisitVariantFieldsStaticNamed, VisitVariantsStatic, Visitor,
 };
 
 use crate::{Adapter, FromFn, FromFnAsync, FromFnAsyncLocal, HandlerTypes, ParentHandler};
@@ -202,11 +202,13 @@ where
                     serde_json::to_string(&name.0).unwrap()
                 )
                 .ok();
-                // Call get_ts on the handler
+                // A `no_ts()` child still needs a well-formed leaf node, otherwise a bare
+                // `unknown` value fails the `RpcHandler` index-signature constraint in
+                // type-helpers.ts and poisons inference for the entire tree.
                 if let Some(ts) = handler.0.get_ts() {
                     ts.visit(visitor);
                 } else {
-                    visitor.ts.push_str("unknown");
+                    visitor.ts.push_str("{_PARAMS:unknown;_RETURN:unknown}");
                 }
                 visitor.ts.push(';');
             }
@@ -271,8 +273,10 @@ impl TSVisitor {
         self.visit_ty(&Static::<T>::new(), T::DEFINE);
     }
     pub fn insert_definition(&mut self, name: &'static str, definition: String) {
+        // Two distinct types sharing a `DEFINE` name is a caller bug; flag it in debug
+        // rather than panicking a release build (this is a pure type-generation library).
         if let Some(def) = self.definitions.get(&name) {
-            assert_eq!(def, &definition, "Conflicting definitions for {name}");
+            debug_assert_eq!(def, &definition, "Conflicting definitions for {name}");
         }
         debug_assert!(!definition.is_empty());
         self.definitions.insert(name, definition);
@@ -287,6 +291,29 @@ impl TSVisitor {
         }
         self.insert_definition(name, ts);
     }
+    /// Render a complete TypeScript module: the `type-helpers.ts` declarations, every named
+    /// `DEFINE` definition collected while visiting, and an exported alias `root_name` for the
+    /// visited root type. The result type-checks against `RpcParamType`/`RpcReturnType`.
+    pub fn into_module(self, root_name: &str) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        out.push_str(type_helpers());
+        out.push('\n');
+        for (name, def) in &self.definitions {
+            writeln!(&mut out, "export type {name} = {def};").ok();
+        }
+        writeln!(&mut out, "export type {root_name} = {};", self.ts).ok();
+        out
+    }
+}
+
+/// Build a full TypeScript bindings module for a handler tree, or `None` if the root handler
+/// opts out of TS (`no_ts()`). `root_name` is the exported alias for the root handler type.
+pub fn handler_bindings<H: HandlerTSBindings>(handler: &H, root_name: &str) -> Option<String> {
+    let ts = handler.get_ts()?;
+    let mut visitor = TSVisitor::new();
+    ts.visit(&mut visitor);
+    Some(visitor.into_module(root_name))
 }
 impl Visitor for TSVisitor {
     type Result = ();
@@ -300,13 +327,24 @@ where
     fn visit(&self, visitor: &mut TSVisitor) -> <TSVisitor as Visitor>::Result {
         use std::fmt::Write;
 
+        // serde drops `skip` / `skip_serializing` fields from the wire format.
+        if field_is_skipped(self.metadata) {
+            return;
+        }
         if let Some(name) = self.name {
             if name.chars().all(|c| c.is_alphanumeric() || c == '_')
-                && name.chars().next().map_or(false, |c| c.is_alphabetic())
+                && name
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_alphabetic() || c == '_')
             {
                 visitor.ts.push_str(name);
             } else {
                 write!(&mut visitor.ts, "{}", serde_json::to_string(&name).unwrap()).unwrap();
+            }
+            // `skip_serializing_if` / `default` make the key optional on the wire.
+            if field_is_optional(self.metadata) {
+                visitor.ts.push('?');
             }
             visitor.ts.push_str(":");
         }
@@ -319,65 +357,78 @@ where
     }
 }
 
-#[derive(Default)]
-pub struct SerdeTag {
-    pub tag: Option<syn::LitStr>,
-    pub contents: Option<syn::LitStr>,
+/// The serde enum representation, resolved at runtime from the enum's attribute metadata.
+enum SerdeRepr {
+    External,
+    Internal {
+        tag: &'static str,
+    },
+    Adjacent {
+        tag: &'static str,
+        content: &'static str,
+    },
+    Untagged,
 }
-impl SerdeTag {
-    pub fn apply_meta(this: &mut Option<Self>, meta: &syn::Meta) {
-        if meta.path().is_ident("untagged") {
-            *this = None;
-        } else if meta.path().is_ident("tag") {
-            if let Some(tag) = meta.require_name_value().ok() {
-                if let syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(tag),
-                    ..
-                }) = &tag.value
-                {
-                    this.get_or_insert_default().tag = Some(tag.clone());
-                }
-            }
-        } else if meta.path().is_ident("contents") {
-            if let Some(tag) = meta.require_name_value().ok() {
-                if let syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(tag),
-                    ..
-                }) = &tag.value
-                {
-                    this.get_or_insert_default().contents = Some(tag.clone());
-                }
-            }
+
+fn meta_str(items: &'static [AttributeMeta], name: &str) -> Option<&'static str> {
+    items.iter().find_map(|m| match m {
+        AttributeMeta::NameValue {
+            name: n,
+            value: MetaValue::Str(s),
+            ..
+        } if *n == name => Some(*s),
+        _ => None,
+    })
+}
+
+fn meta_has_path(items: &'static [AttributeMeta], name: &str) -> bool {
+    items
+        .iter()
+        .any(|m| matches!(m, AttributeMeta::Path { path } if *path == name))
+}
+
+/// Whether a `#[serde(..)]` / `#[visit(..)]` list anywhere in `metadata` carries an item
+/// named `name`, whether as a bare flag (`skip`) or a name-value (`skip_serializing_if = "…"`).
+fn meta_flag(metadata: &'static [AttributeMeta], name: &str) -> bool {
+    metadata.iter().any(|m| match m {
+        AttributeMeta::List { items, .. } => items.iter().any(|i| match i {
+            AttributeMeta::Path { path } => *path == name,
+            AttributeMeta::NameValue { name: n, .. } => *n == name,
+            AttributeMeta::List { path, .. } => *path == name,
+            AttributeMeta::Unparsed { .. } => false,
+        }),
+        _ => false,
+    })
+}
+
+fn field_is_skipped(metadata: &'static [AttributeMeta]) -> bool {
+    meta_flag(metadata, "skip") || meta_flag(metadata, "skip_serializing")
+}
+
+fn field_is_optional(metadata: &'static [AttributeMeta]) -> bool {
+    meta_flag(metadata, "skip_serializing_if") || meta_flag(metadata, "default")
+}
+
+fn enum_repr(metadata: &'static [AttributeMeta]) -> SerdeRepr {
+    let (mut tag, mut content, mut untagged) = (None, None, false);
+    for m in metadata {
+        if let AttributeMeta::List { items, .. } = m {
+            tag = tag.or_else(|| meta_str(items, "tag"));
+            content = content.or_else(|| meta_str(items, "content"));
+            untagged |= meta_has_path(items, "untagged");
         }
     }
-    pub fn from_metas(metas: &[syn::Meta]) -> Option<Self> {
-        let mut res = Some(SerdeTag::default());
-        for meta in metas.into_iter().filter_map(|m| m.require_list().ok()) {
-            if meta.path.is_ident("serde") {
-                syn::parse2::<syn::Meta>(meta.tokens.clone())
-                    .ok()
-                    .as_ref()
-                    .map(|meta| Self::apply_meta(&mut res, meta));
-            }
-        }
-        for meta in metas.into_iter().filter_map(|m| m.require_list().ok()) {
-            if meta.path.is_ident("visit") {
-                if let Some(meta) = syn::parse2::<syn::Meta>(meta.tokens.clone())
-                    .ok()
-                    .as_ref()
-                    .and_then(|m| m.require_list().ok())
-                {
-                    if meta.path.is_ident("ts") {
-                        syn::parse2::<syn::Meta>(meta.tokens.clone())
-                            .ok()
-                            .as_ref()
-                            .map(|meta| Self::apply_meta(&mut res, meta));
-                    }
-                }
-            }
-        }
-        None
+    match (untagged, tag, content) {
+        (true, _, _) => SerdeRepr::Untagged,
+        (false, Some(tag), Some(content)) => SerdeRepr::Adjacent { tag, content },
+        (false, Some(tag), None) => SerdeRepr::Internal { tag },
+        (false, None, _) => SerdeRepr::External,
     }
+}
+
+fn push_json_str(visitor: &mut TSVisitor, s: &str) {
+    use std::fmt::Write;
+    write!(&mut visitor.ts, "{}", serde_json::to_string(s).unwrap()).unwrap();
 }
 
 impl<'a, T> Visit<TSVisitor> for Variant<'a, Static<T>>
@@ -386,26 +437,70 @@ where
     T: VisitVariantFieldsStaticNamed<TSVisitor> + VisitVariantFieldsStatic<TSVisitor>,
 {
     fn visit(&self, visitor: &mut TSVisitor) -> <TSVisitor as Visitor>::Result {
-        // TODO: handle serde tagging
-        let tag = Some(SerdeTag {
-            tag: None,
-            contents: None,
-        });
-
         if T::DATA.variant_count > 1 {
             visitor.ts.push('|');
         }
-        visit_struct_impl(
-            &self.info,
-            |name, visitor| {
-                if name {
-                    T::visit_variant_fields_static_named(&self.info, visitor).for_each(drop);
+        let name = self.info.name;
+        // A unit variant (serde serializes it as a bare value) — distinct from an empty
+        // struct variant `V {}`, which still serializes as an object.
+        let is_unit = self.info.field_count == 0 && !self.info.named_fields;
+        let render_payload = |visitor: &mut TSVisitor| {
+            visit_struct_impl(
+                &self.info,
+                |named, visitor| {
+                    if named {
+                        T::visit_variant_fields_static_named(&self.info, visitor).for_each(drop);
+                    } else {
+                        T::visit_variant_fields_static(&self.info, visitor).for_each(drop);
+                    }
+                },
+                visitor,
+            );
+        };
+        match enum_repr(T::DATA.metadata) {
+            SerdeRepr::External => {
+                if is_unit {
+                    push_json_str(visitor, name);
                 } else {
-                    T::visit_variant_fields_static(&self.info, visitor).for_each(drop);
+                    visitor.ts.push('{');
+                    push_json_str(visitor, name);
+                    visitor.ts.push(':');
+                    render_payload(visitor);
+                    visitor.ts.push('}');
                 }
-            },
-            visitor,
-        );
+            }
+            SerdeRepr::Internal { tag } => {
+                visitor.ts.push('{');
+                push_json_str(visitor, tag);
+                visitor.ts.push(':');
+                push_json_str(visitor, name);
+                visitor.ts.push('}');
+                if !is_unit {
+                    visitor.ts.push('&');
+                    render_payload(visitor);
+                }
+            }
+            SerdeRepr::Adjacent { tag, content } => {
+                visitor.ts.push('{');
+                push_json_str(visitor, tag);
+                visitor.ts.push(':');
+                push_json_str(visitor, name);
+                if !is_unit {
+                    visitor.ts.push(';');
+                    push_json_str(visitor, content);
+                    visitor.ts.push(':');
+                    render_payload(visitor);
+                }
+                visitor.ts.push('}');
+            }
+            SerdeRepr::Untagged => {
+                if is_unit {
+                    visitor.ts.push_str("null");
+                } else {
+                    render_payload(visitor);
+                }
+            }
+        }
     }
 }
 
@@ -436,8 +531,9 @@ macro_rules! impl_ts {
 
 impl_ts!(bool => "boolean");
 impl_ts!(String,str,InternedString => "string");
-impl_ts!(usize,u8,u16,u32,isize,i8,i16,i32,f32,f64 => "number");
-impl_ts!(u64,u128,i64,i128 => "bigint");
+// serde_json serializes all of these as bare JSON numbers (not strings), so they map to
+// `number` — even u64/i64/i128, which JSON.parse yields as `number`, never `bigint`.
+impl_ts!(usize,u8,u16,u32,u64,u128,isize,i8,i16,i32,i64,i128,f32,f64 => "number");
 impl_ts!(Unknown,imbl_value::Value,serde_json::Value,serde_cbor::Value => "unknown");
 impl_ts!(Never => "never");
 
@@ -492,6 +588,18 @@ macro_rules! impl_ts_struct {
     };
 }
 
+#[macro_export]
+macro_rules! impl_ts_enum {
+    ($ty:ty $({ define: $name:expr })?) => {
+        impl $crate::ts::TS for $ty {
+            $(const DEFINE: Option<&str> = Some($name);)?
+            fn visit_ts(visitor: &mut $crate::ts::TSVisitor) {
+                $crate::ts::visit_enum::<$ty>(visitor)
+            }
+        }
+    };
+}
+
 pub fn visit_enum<T>(visitor: &mut TSVisitor)
 where
     T: VisitVariantsStatic<TSVisitor>,
@@ -508,18 +616,17 @@ where
     K: TS,
     V: TS,
 {
-    visitor.ts.push_str("{[key");
     if K::IS_ENUMERABLE {
-        visitor.ts.push_str(" in ");
-    } else {
-        visitor.ts.push(':');
+        // A string-literal-union key (e.g. an all-unit enum): a mapped type with optional members.
+        visitor.ts.push_str("{[key in ");
+        visitor.append_type::<K>();
+        visitor.ts.push_str("]?:");
+        visitor.append_type::<V>();
+        visitor.ts.push('}');
+        return;
     }
-    visitor.append_type::<K>();
-    visitor.ts.push(']');
-    if K::IS_ENUMERABLE {
-        visitor.ts.push('?');
-    }
-    visitor.ts.push(':');
+    // JSON object keys are always strings on the wire, regardless of K's Rust type.
+    visitor.ts.push_str("{[key:string]:");
     visitor.append_type::<V>();
     visitor.ts.push('}');
 }
@@ -603,5 +710,15 @@ impl<T: TS> TS for Rc<T> {
     const IS_ENUMERABLE: bool = T::IS_ENUMERABLE;
     fn visit_ts(visitor: &mut TSVisitor) {
         T::visit_ts(visitor);
+    }
+}
+
+// serde serializes `Option<T>` as the inner value or JSON `null`. As a struct field this is
+// `field: T | null` by default; `#[serde(skip_serializing_if = "Option::is_none")]` makes the
+// key optional instead, which `Named::visit` renders as `field?:` via the field metadata.
+impl<T: TS> TS for Option<T> {
+    fn visit_ts(visitor: &mut TSVisitor) {
+        visitor.append_type::<T>();
+        visitor.ts.push_str("|null");
     }
 }

@@ -18,10 +18,12 @@ use crate::ts::{
     TSVisitor,
 };
 use crate::util::{Flat, PhantomData};
+#[cfg(feature = "ts")]
+use crate::PassthroughCliBindings;
 use crate::{
     CallRemote, CallRemoteHandler, CliBindings, DynHandler, Handler, HandlerArgs, HandlerArgsFor,
-    HandlerFor, HandlerTypes, LeafHandler, OrEmpty, PassthroughCliBindings, PassthroughHandlerFor,
-    PassthroughHandlerTypes, PrintCliResult, WithContext,
+    HandlerFor, HandlerTypes, LeafHandler, OrEmpty, PassthroughHandlerFor, PassthroughHandlerTypes,
+    PrintCliResult, WithContext,
 };
 
 pub trait Adapter {

@@ -13,6 +13,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
+#[cfg(feature = "ts")]
 use crate::impl_ts_struct;
 use crate::ts::HandlerTSBindings;
 use crate::util::{internal_error, invalid_params, Flat};
@@ -511,6 +512,7 @@ where
 #[cfg_attr(feature = "ts", derive(visit_rs::VisitFields))]
 #[group(skip)]
 pub struct Empty {}
+#[cfg(feature = "ts")]
 impl_ts_struct!(Empty);
 
 pub trait OrEmpty<T> {

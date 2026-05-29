@@ -1745,9 +1745,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "visit-rs"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f89c27f644c3e4ce302bc7bce5144e295405d569784e5f4921271404e600cecf"
+version = "0.1.10"
+source = "git+https://github.com/helix-nine/visit-rs?branch=fix%2Fts-bindings-metadata#12d5c3a36e5dd09eeee27b52e8cb0536f1b62ca0"
 dependencies = [
  "async-stream",
  "futures",
@@ -1757,9 +1756,8 @@ dependencies = [
 
 [[package]]
 name = "visit-rs-derive"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a3bfb04fd13da4fc8df24709b7a0949667f43c63691d9fecddf1d3be8af5099"
+version = "0.1.8"
+source = "git+https://github.com/helix-nine/visit-rs?branch=fix%2Fts-bindings-metadata#12d5c3a36e5dd09eeee27b52e8cb0536f1b62ca0"
 dependencies = [
  "proc-macro2",
  "quote",

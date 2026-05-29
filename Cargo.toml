@@ -39,5 +39,18 @@ thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util", "net"] }
 url = "2"
-visit-rs = { version = "0.1.9", optional = true }
+# TODO: point back at a published crates.io release once dr-bonez/visit-rs#1 is merged + published.
+visit-rs = { version = "0.1.10", optional = true, default-features = false, features = ["serde", "meta"], git = "https://github.com/helix-nine/visit-rs", branch = "fix/ts-bindings-metadata" }
 yajrc = "0.1"
+
+[[test]]
+name = "test"
+required-features = ["ts"]
+
+[[test]]
+name = "ts_bindings"
+required-features = ["ts"]
+
+[[example]]
+name = "generate_ts"
+required-features = ["ts"]
