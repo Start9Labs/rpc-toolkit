@@ -1746,7 +1746,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "visit-rs"
 version = "0.1.10"
-source = "git+https://github.com/helix-nine/visit-rs?branch=fix%2Fts-bindings-metadata#c82dd9a9ef72ef71c0406e7fa94265ca61c49cab"
+source = "git+https://github.com/helix-nine/visit-rs?branch=fix%2Fts-bindings-metadata#a6a1120a248d0b3cefeea9d92867144d707d95a8"
 dependencies = [
  "async-stream",
  "futures",
@@ -1757,7 +1757,7 @@ dependencies = [
 [[package]]
 name = "visit-rs-derive"
 version = "0.1.8"
-source = "git+https://github.com/helix-nine/visit-rs?branch=fix%2Fts-bindings-metadata#c82dd9a9ef72ef71c0406e7fa94265ca61c49cab"
+source = "git+https://github.com/helix-nine/visit-rs?branch=fix%2Fts-bindings-metadata#a6a1120a248d0b3cefeea9d92867144d707d95a8"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -108,6 +108,19 @@ fn untagged_enum() {
     assert_eq!(render::<Untagged>(), "|number|string");
 }
 
+// A generic enum (visit-rs now supports these for 'static type params) instantiated concretely.
+#[derive(Serialize, Deserialize, VisitVariants)]
+enum Resp<T> {
+    Ok(T),
+    Err(String),
+}
+impl_ts_enum!(Resp<u32>);
+
+#[test]
+fn generic_enum() {
+    assert_eq!(render::<Resp<u32>>(), r#"|{"Ok":number}|{"Err":string}"#);
+}
+
 #[derive(Serialize, Deserialize, VisitFields)]
 struct Maps {
     by_str: BTreeMap<String, u32>,
