@@ -251,6 +251,9 @@ where
 pub struct TSVisitor {
     pub definitions: BTreeMap<&'static str, String>,
     pub ts: String,
+    /// Inner types of `#[serde(flatten)]` fields, collected while visiting the current object
+    /// and emitted as `& Inner` intersection members once its `{...}` body is closed.
+    flattened: Vec<String>,
 }
 impl TSVisitor {
     pub fn new() -> Self {
@@ -284,7 +287,7 @@ impl TSVisitor {
     pub fn load_definition(
         &mut self,
         name: &'static str,
-        TSVisitor { definitions, ts }: TSVisitor,
+        TSVisitor { definitions, ts, .. }: TSVisitor,
     ) {
         for (name, definition) in definitions {
             self.insert_definition(name, definition);
@@ -329,6 +332,15 @@ where
 
         // serde drops `skip` / `skip_serializing` fields from the wire format.
         if field_is_skipped(self.metadata) {
+            return;
+        }
+        // serde `flatten` splices the inner type's fields into the parent object; model it as a
+        // TS intersection member. Capture the inner type and stash it for `visit_struct_impl`.
+        if field_is_flattened(self.metadata) {
+            let start = visitor.ts.len();
+            visitor.append_type::<T>();
+            let inner = visitor.ts.split_off(start);
+            visitor.flattened.push(inner);
             return;
         }
         if let Some(name) = self.name {
@@ -407,6 +419,14 @@ fn field_is_skipped(metadata: &'static [AttributeMeta]) -> bool {
 
 fn field_is_optional(metadata: &'static [AttributeMeta]) -> bool {
     meta_flag(metadata, "skip_serializing_if") || meta_flag(metadata, "default")
+}
+
+fn field_is_flattened(metadata: &'static [AttributeMeta]) -> bool {
+    meta_flag(metadata, "flatten")
+}
+
+fn struct_is_transparent(metadata: &'static [AttributeMeta]) -> bool {
+    meta_flag(metadata, "transparent")
 }
 
 fn enum_repr(metadata: &'static [AttributeMeta]) -> SerdeRepr {
@@ -544,18 +564,20 @@ fn visit_struct_impl(
 ) {
     if !info.named_fields && info.field_count == 1 {
         fields(false, visitor)
-    } else {
-        if info.named_fields {
-            visitor.ts.push_str("{");
-        } else {
-            visitor.ts.push_str("[");
-        }
+    } else if info.named_fields {
+        // Named object: collect any flattened fields, close the body, then intersect them in.
+        let saved = std::mem::take(&mut visitor.flattened);
+        visitor.ts.push_str("{");
         fields(true, visitor);
-        if info.named_fields {
-            visitor.ts.push_str("}");
-        } else {
-            visitor.ts.push_str("]");
+        visitor.ts.push_str("}");
+        for inner in std::mem::replace(&mut visitor.flattened, saved) {
+            visitor.ts.push('&');
+            visitor.ts.push_str(&inner);
         }
+    } else {
+        visitor.ts.push_str("[");
+        fields(true, visitor);
+        visitor.ts.push_str("]");
     }
 }
 
@@ -563,6 +585,11 @@ pub fn visit_struct<T>(visitor: &mut TSVisitor)
 where
     T: VisitFieldsStaticNamed<TSVisitor> + VisitFieldsStatic<TSVisitor>,
 {
+    // `#[serde(transparent)]` serializes the single field's value directly, with no wrapper.
+    if struct_is_transparent(T::DATA.metadata) {
+        T::visit_fields_static(visitor).for_each(drop);
+        return;
+    }
     visit_struct_impl(
         &T::DATA,
         |named, visitor| {

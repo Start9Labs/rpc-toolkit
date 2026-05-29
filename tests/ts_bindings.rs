@@ -158,6 +158,42 @@ fn named_definitions() {
     assert!(module.contains("export type RpcParamType"));
 }
 
+#[derive(Serialize, Deserialize, VisitFields)]
+struct Address {
+    street: String,
+    zip: u32,
+}
+impl_ts_struct!(Address);
+
+#[derive(Serialize, Deserialize, VisitFields)]
+struct Person {
+    name: String,
+    #[serde(flatten)]
+    address: Address,
+}
+impl_ts_struct!(Person);
+
+#[test]
+fn flatten_intersects_inner_fields() {
+    // serde splices Address's fields into Person; modeled as a TS intersection.
+    assert_eq!(
+        render::<Person>(),
+        "{name:string;}&{street:string;zip:number;}"
+    );
+}
+
+#[derive(Serialize, Deserialize, VisitFields)]
+#[serde(transparent)]
+struct Wrapper {
+    value: Vec<u32>,
+}
+impl_ts_struct!(Wrapper);
+
+#[test]
+fn transparent_unwraps_single_field() {
+    assert_eq!(render::<Wrapper>(), "(number)[]");
+}
+
 #[derive(Clone)]
 struct Ctx;
 impl Context for Ctx {}
