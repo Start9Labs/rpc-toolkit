@@ -163,8 +163,11 @@ where
 impl<Context, Params, InheritedParams> ReturnTS
     for ParentHandler<Context, Params, InheritedParams>
 {
-    fn return_ts(&self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync>> {
-        None
+    fn return_ts<'a>(&'a self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync + 'a>> {
+        // A parent with a root handler is itself callable (at the empty method path); surface
+        // the root handler's return type as the parent node's `_RETURN`. Its params already
+        // match the parent's `_PARAMS` (enforced by `root_handler`'s `Params = Params` bound).
+        self.subcommands.0.as_ref()?.get_ts()?.return_ts
     }
 }
 
@@ -747,5 +750,15 @@ impl<T: TS> TS for Option<T> {
     fn visit_ts(visitor: &mut TSVisitor) {
         visitor.append_type::<T>();
         visitor.ts.push_str("|null");
+    }
+}
+
+// `Flat<A, B>` serializes as the merge of A's and B's fields (used for inherited params), which
+// is a TS object intersection.
+impl<A: TS, B: TS> TS for crate::util::Flat<A, B> {
+    fn visit_ts(visitor: &mut TSVisitor) {
+        visitor.append_type::<A>();
+        visitor.ts.push('&');
+        visitor.append_type::<B>();
     }
 }

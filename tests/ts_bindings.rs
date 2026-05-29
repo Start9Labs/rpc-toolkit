@@ -8,7 +8,8 @@ use rpc_toolkit::{
     Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async, impl_ts_enum, impl_ts_struct,
 };
 use serde::{Deserialize, Serialize};
-use visit_rs::{EnumInfo, Visit, VisitFields, VisitVariants};
+// No `Visit` / `EnumInfo` import needed — the derives are import-free.
+use visit_rs::{VisitFields, VisitVariants};
 use yajrc::RpcError;
 
 fn render<T: TS>() -> String {
@@ -216,4 +217,34 @@ fn handler_tree_bindings() {
     assert!(module.contains("\"echo\":{_PARAMS:"));
     assert!(module.contains("\"ping\":{_PARAMS:unknown;_RETURN:unknown}"));
     assert!(module.contains("export type Api ="));
+}
+
+#[test]
+fn flat_is_object_intersection() {
+    assert_eq!(
+        render::<rpc_toolkit::util::Flat<Address, Maps>>(),
+        "{street:string;zip:number;}&{by_str:{[key:string]:number};by_num:{[key:string]:string};}"
+    );
+}
+
+#[derive(Serialize, Deserialize, VisitFields)]
+struct RootParams {
+    token: String,
+}
+impl_ts_struct!(RootParams);
+
+async fn root_call(_: Ctx, p: RootParams) -> Result<u32, RpcError> {
+    Ok(p.token.len() as u32)
+}
+
+#[test]
+fn callable_parent_surfaces_root_handler() {
+    // A parent with a root handler is itself callable: its node carries the root handler's
+    // _RETURN (and its _PARAMS already match, per root_handler's bound).
+    let root = ParentHandler::<Ctx, RootParams, Empty>::new()
+        .root_handler(from_fn_async(root_call).no_cli())
+        .subcommand("ping", from_fn(ping).no_ts());
+
+    let module = handler_bindings(&root, "Api").expect("root has ts");
+    assert!(module.contains("export type Api = {_PARAMS:{token:string;};_RETURN:number;_CHILDREN:"));
 }

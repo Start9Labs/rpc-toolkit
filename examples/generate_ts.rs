@@ -6,8 +6,7 @@ use rpc_toolkit::{
     Context, Empty, HandlerExt, ParentHandler, from_fn_async, impl_ts_enum, impl_ts_struct,
 };
 use serde::{Deserialize, Serialize};
-// `VisitVariants`-derived enums need these traits in scope (the derive uses method-call syntax).
-use visit_rs::{EnumInfo, Visit, VisitFields, VisitVariants};
+use visit_rs::{VisitFields, VisitVariants};
 use yajrc::RpcError;
 
 #[derive(Clone)]
@@ -38,6 +37,10 @@ async fn create_user(_: Ctx, p: CreateUser) -> Result<u64, RpcError> {
 async fn job(_: Ctx, _: Empty) -> Result<JobResult, RpcError> {
     Ok(JobResult::Pending)
 }
+// A directly-callable parent: invoking `jobs` itself (empty sub-method) returns the latest job.
+async fn jobs_root(_: Ctx, _: Empty) -> Result<JobResult, RpcError> {
+    Ok(JobResult::Pending)
+}
 
 fn main() {
     let root = ParentHandler::<Ctx, Empty, Empty>::new()
@@ -45,6 +48,7 @@ fn main() {
         .subcommand(
             "jobs",
             ParentHandler::<Ctx, Empty, Empty>::new()
+                .root_handler(from_fn_async(jobs_root).no_cli())
                 .subcommand("run", from_fn_async(job).no_cli()),
         );
 

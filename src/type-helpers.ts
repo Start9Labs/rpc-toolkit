@@ -13,29 +13,31 @@ export type LeafHandler = {
   _RETURN: unknown;
 };
 
+// An empty method resolves to the node itself (a directly-callable handler, e.g. a parent
+// with a root handler). A single segment recurses into that child with an empty method, which
+// unifies leaf children and directly-callable parent children.
 export type RpcParamType<
   Root extends RpcHandler,
   Method extends string
-> = Root["_PARAMS"] &
-  (Root extends ParentHandler
-    ? Method extends `${infer A}.${infer B}`
-      ? RpcParamType<Root["_CHILDREN"][A], B>
-      : Root["_CHILDREN"] extends {
-          [m in Method]: LeafHandler;
-        }
-      ? Root["_CHILDREN"][Method]["_PARAMS"]
-      : never
-    : never);
+> = Method extends ""
+  ? Root["_PARAMS"]
+  : Root extends ParentHandler
+  ? Method extends `${infer A}.${infer B}`
+    ? Root["_PARAMS"] & RpcParamType<Root["_CHILDREN"][A], B>
+    : Method extends keyof Root["_CHILDREN"]
+    ? Root["_PARAMS"] & RpcParamType<Root["_CHILDREN"][Method], "">
+    : never
+  : never;
 
 export type RpcReturnType<
   Root extends RpcHandler,
   Method extends string
-> = Root extends ParentHandler
+> = Method extends ""
+  ? Root["_RETURN"]
+  : Root extends ParentHandler
   ? Method extends `${infer A}.${infer B}`
     ? RpcReturnType<Root["_CHILDREN"][A], B>
-    : Root["_CHILDREN"] extends {
-        [m in Method]: LeafHandler;
-      }
-    ? Root["_CHILDREN"][Method]["_RETURN"]
+    : Method extends keyof Root["_CHILDREN"]
+    ? RpcReturnType<Root["_CHILDREN"][Method], "">
     : never
   : never;
